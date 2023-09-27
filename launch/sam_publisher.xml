@@ -1,0 +1,20 @@
+<launch>
+    <node pkg="gum_perception" exec="sam_publisher" name="sam" namespace="gum">
+        <param name="device" value="0" />
+        <param name="height" value="480" />
+        <param name="width" value="640" />
+        <param name="intrinsics"
+            value="[615.0073931049496, 614.3857762049058, 326.1533471461406, 234.2844635618677, 0.1272466505998945, -0.2810470538567604, -0.0013263207505766492, 0.0006093121906229885]" />
+        <param name="depth_scale" value="0.000607" />
+        <param name="min_depth" value="0.15" />
+        <param name="max_depth" value="0.85" />
+        <param name="model_path" value="/home/taoshaf/Documents/GUM/gum/labs/cpp/models/" />
+        <param name="sam_encoder" value="mobile_sam_encoder.jit" />
+        <param name="sam_decoder" value="mobile_sam_decoder.jit" />
+        <param name="superpoint" value="superpoint.onnx" />
+        <param name="lightglue" value="superpoint_lightglue.onnx" />
+        <param name="ostrack" value="ostracker.onnx" />
+        <param name="trt_engine_cache"
+            value="trt_engine_cache/" />
+    </node>
+</launch>

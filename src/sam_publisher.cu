@@ -4,29 +4,39 @@
 #include <gum/perception/feature/outlier_rejection.h>
 #include <gum/perception/utils/utils.cuh>
 #include <gum/utils/cuda_utils.cuh>
+#include <gum/utils/utils.h>
+
+#include <opencv2/imgproc.hpp>
 
 namespace gum {
 namespace perception {
 SAMPublisher::SAMPublisher(const std::string &node_name,
                            const std::string &color_topic,
                            const std::string &depth_topic,
-                           const std::string &sam_topic,
-                           const std::string &sam_encoder_checkpoint,
-                           const std::string &sam_decoder_checkpoint,
-                           const std::string &superpoint_checkpoint,
-                           const std::string &lightglue_checkpoint,
-                           const std::string &ostrack_checkpoint,
-                           const std::string &trt_engine_cache_path)
+                           const std::string &sam_topic)
     : rclcpp::Node(node_name) {
+  igraph_rng_seed(igraph_rng_default(), 0);
+
   this->declare_parameter("device", rclcpp::PARAMETER_INTEGER);
   this->declare_parameter("height", rclcpp::PARAMETER_INTEGER);
   this->declare_parameter("width", rclcpp::PARAMETER_INTEGER);
   this->declare_parameter("intrinsics", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("depth_scale", rclcpp::PARAMETER_DOUBLE);
+  this->declare_parameter("min_depth", rclcpp::PARAMETER_DOUBLE);
+  this->declare_parameter("max_depth", rclcpp::PARAMETER_DOUBLE);
+  this->declare_parameter("model_path", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("sam_encoder", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("sam_decoder", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("superpoint", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("lightglue", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("ostrack", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("trt_engine_cache", rclcpp::PARAMETER_STRING);
 
-  m_color_subscriber =
-      std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
-          this, color_topic);
+  m_segmentation_publisher =
+      this->create_publisher<sensor_msgs::msg::Image>(sam_topic, 10);
+  m_color_subscriber = std::make_shared<
+      message_filters::Subscriber<sensor_msgs::msg::CompressedImage>>(
+      this, color_topic);
   m_depth_subscriber =
       std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
           this, depth_topic);
@@ -34,24 +44,54 @@ SAMPublisher::SAMPublisher(const std::string &node_name,
       std::make_shared<message_filters::Synchronizer<ApproximatePolicy>>(
           ApproximatePolicy(10), *m_color_subscriber, *m_depth_subscriber);
   m_synchronizer->registerCallback(&SAMPublisher::CallBack, this);
-  m_sam = std::make_shared<gum::perception::segmentation::SAM>(
-      sam_encoder_checkpoint, sam_decoder_checkpoint);
-  m_superpoint = std::make_shared<gum::perception::feature::SuperPoint>(
-      superpoint_checkpoint, trt_engine_cache_path);
-  m_lightglue = std::make_shared<gum::perception::feature::LightGlue>(
-      lightglue_checkpoint, trt_engine_cache_path);
 
   m_device = this->get_parameter("device").as_int();
   m_height = this->get_parameter("height").as_int();
   m_width = this->get_parameter("width").as_int();
+  m_intrinsics = Eigen::Map<const Eigen::Vector<double, 8>>(
+                     this->get_parameter("intrinsics").as_double_array().data())
+                     .cast<float>();
   m_depth_scale = this->get_parameter("depth_scale").as_double();
-  auto intrinsics = this->get_parameter("intrinsics").as_double_array();
+  m_min_depth = this->get_parameter("min_depth").as_double();
+  m_max_depth = this->get_parameter("max_depth").as_double();
+
+  RCLCPP_INFO_STREAM_ONCE(this->get_logger(), "Intrinsics "
+                                                  << m_intrinsics.transpose()
+                                                  << std::endl);
+
+  const std::string model_path = this->get_parameter("model_path").as_string();
+  const std::string sam_encoder_checkpoint =
+      model_path + this->get_parameter("sam_encoder").as_string();
+  const std::string sam_decoder_checkpoint =
+      model_path + this->get_parameter("sam_decoder").as_string();
+  const std::string superpoint_checkpoint =
+      model_path + this->get_parameter("superpoint").as_string();
+  const std::string lightglue_checkpoint =
+      model_path + this->get_parameter("lightglue").as_string();
+  const std::string ostrack_checkpoint =
+      model_path + this->get_parameter("ostrack").as_string();
+  const std::string trt_engine_cache_path =
+      model_path + this->get_parameter("trt_engine_cache").as_string();
+
+  CHECK_CUDA(cudaSetDevice(m_device));
+  m_handle = std::make_shared<gum::graph::Handle>();
+
+  m_sam = std::make_shared<gum::perception::segmentation::SAM>(
+      sam_encoder_checkpoint, sam_decoder_checkpoint, m_device);
+  m_superpoint = std::make_shared<gum::perception::feature::SuperPoint>(
+      superpoint_checkpoint, trt_engine_cache_path, m_device);
+  m_lightglue = std::make_shared<gum::perception::feature::LightGlue>(
+      lightglue_checkpoint, trt_engine_cache_path, m_device);
+  m_ostracker = std::make_shared<gum::perception::bbox::OSTrack>(
+      ostrack_checkpoint, trt_engine_cache_path, m_device);
 
   m_dataset = std::make_shared<gum::perception::dataset::RealSenseDataset<
       gum::perception::dataset::Device::GPU>>(
-      m_device, m_height, m_width, intrinsics[0], intrinsics[1], intrinsics[2],
-      intrinsics[3], intrinsics[4], intrinsics[5], intrinsics[6], intrinsics[7],
-      m_depth_scale);
+      m_device, m_height, m_width, m_intrinsics[0], m_intrinsics[1],
+      m_intrinsics[2], m_intrinsics[3], m_intrinsics[4], m_intrinsics[5],
+      m_intrinsics[6], m_intrinsics[7], m_depth_scale);
+
+  RCLCPP_INFO_STREAM_ONCE(this->get_logger(), "Segmentation Publisher Setup");
 }
 
 void SAMPublisher::Process(const Frame &prev_frame, Frame &curr_frame) {
@@ -60,7 +100,7 @@ void SAMPublisher::Process(const Frame &prev_frame, Frame &curr_frame) {
   std::vector<Eigen::Vector<float, 256>> initial_descriptors_v;
   std::vector<Eigen::Vector2f> initial_normalized_keypoints_v;
 
-  const Eigen::Vector4f init_bbox;
+  const Eigen::Vector4f &init_bbox = prev_frame.bbox.cast<float>();
 
   torch::Tensor extended_mask_cpu = torch::empty(
       prev_frame.mask_cpu.sizes(),
@@ -173,13 +213,12 @@ void SAMPublisher::Process(const Frame &prev_frame, Frame &curr_frame) {
 }
 
 void SAMPublisher::CallBack(
-    const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
+    const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg) {
   cv_bridge::CvImagePtr color_ptr, depth_ptr;
   color_ptr =
       cv_bridge::toCvCopy(color_msg, sensor_msgs::image_encodings::BGR8);
-  depth_ptr =
-      cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::MONO16);
+  depth_ptr = cv_bridge::toCvCopy(depth_msg, "16UC1");
   double timestamp = double(color_msg->header.stamp.sec) +
                      1e-9 * double(color_msg->header.stamp.nanosec);
   m_dataset->AddFrame(
