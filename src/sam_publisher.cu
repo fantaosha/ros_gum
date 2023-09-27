@@ -1,14 +1,13 @@
-#include <cv_bridge/cv_bridge.h>
 #include <gum_perception/sam_publisher.h>
 
+#include <cv_bridge/cv_bridge.h>
 #include <gum/perception/feature/outlier_rejection.h>
 #include <gum/perception/utils/utils.cuh>
 #include <gum/utils/cuda_utils.cuh>
 #include <gum/utils/kinematics.h>
 #include <gum/utils/utils.h>
-#include <pinocchio/parsers/urdf.hpp>
-
 #include <opencv2/imgproc.hpp>
+#include <pinocchio/parsers/urdf.hpp>
 
 namespace gum {
 namespace perception {
@@ -31,6 +30,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   this->declare_parameter("leiden_resolution", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("outlier_tolerance", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("base_pose", rclcpp::PARAMETER_DOUBLE_ARRAY);
+  this->declare_parameter("pose_wc", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("finger_offset", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("finger_ids", rclcpp::PARAMETER_INTEGER_ARRAY);
 
@@ -67,6 +67,8 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   m_outlier_tolerance = this->get_parameter("outlier_tolerance").as_double();
   m_base_pose = Eigen::Map<const Eigen::Matrix<double, 3, 4>>(
       this->get_parameter("base_pose").as_double_array().data());
+  m_pose_wc = Eigen::Map<const Eigen::Matrix<double, 3, 4>>(
+      this->get_parameter("pose_wc").as_double_array().data());
   m_finger_offset = Eigen::Map<const Eigen::Vector3d>(
       this->get_parameter("finger_offset").as_double_array().data());
   auto finger_ids = this->get_parameter("finger_ids").as_integer_array();
@@ -125,7 +127,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   m_ostracker = std::make_shared<gum::perception::bbox::OSTrack>(
       ostrack_checkpoint, trt_engine_cache_path, m_device);
 
-  m_dataset = std::make_shared<gum::perception::dataset::RealSenseDataset<
+  m_realsense = std::make_shared<gum::perception::dataset::RealSenseDataset<
       gum::perception::dataset::Device::GPU>>(
       m_device, m_height, m_width, m_intrinsics[0], m_intrinsics[1],
       m_intrinsics[2], m_intrinsics[3], m_intrinsics[4], m_intrinsics[5],
@@ -256,7 +258,8 @@ void SAMPublisher::Process(const Frame &prev_frame, Frame &curr_frame) {
 
 void SAMPublisher::AddFrame(
     const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
-    const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg) {
+    const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
+    const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) {
   cv_bridge::CvImagePtr color_ptr, depth_ptr;
   color_ptr =
       cv_bridge::toCvCopy(color_msg, sensor_msgs::image_encodings::BGR8);
@@ -264,19 +267,83 @@ void SAMPublisher::AddFrame(
 
   double timestamp = double(color_msg->header.stamp.sec) +
                      1e-9 * double(color_msg->header.stamp.nanosec);
-  m_dataset->AddFrame(
+  m_realsense->AddFrame(
       {timestamp, std::move(color_ptr->image), std::move(depth_ptr->image)});
-}
-
-void SAMPublisher::GetFingerTips(
-    const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg,
-    std::vector<Eigen::Vector3d> &finger_tips) {
   Eigen::Map<const Eigen::VectorXd> raw_joint_angles(
       joint_msg->position.data(), joint_msg->position.size());
   Eigen::VectorXd joint_angles(m_robot_model.nq);
   joint_angles.segment<4>(0) = raw_joint_angles.segment<4>(0);
   joint_angles.segment<4>(4) = raw_joint_angles.segment<4>(12);
   joint_angles.segment<8>(8) = raw_joint_angles.segment<8>(4);
+  m_joint_angles_v.push_back(std::move(joint_angles));
+}
+
+void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
+                              const Eigen::VectorXd &joint_angles) {
+  Frame curr_frame;
+  curr_frame.id = 0;
+  curr_frame.image = image;
+  curr_frame.depth = depth;
+
+  std::vector<Eigen::Vector3d> finger_tips;
+  Eigen::Vector2d pixel_c;
+
+  GetFingerTips(joint_angles, finger_tips);
+  ProjectGraspCenter(finger_tips, pixel_c);
+
+  RCLCPP_INFO_STREAM_ONCE(this->get_logger(),
+                          "Initial prompt: " << pixel_c[0] << " " << pixel_c[1]
+                                             << std::endl;);
+
+  m_sam->SetImage(curr_frame.image);
+  std::vector<Eigen::Vector2f> point_coords_v{pixel_c.cast<float>()};
+  std::vector<float> point_labels_v(point_coords_v.size(), 1.0f);
+  torch::Tensor masks, scores, logits;
+  m_sam->Query(point_coords_v, point_labels_v, torch::nullopt, masks, scores,
+               logits);
+
+  curr_frame.mask_gpu = masks[0][1].to(torch::kUInt8);
+  curr_frame.mask_cpu = curr_frame.mask_gpu.to(torch::kCPU);
+
+#if 1
+  {
+    for (int i = 0; i < 3; i++) {
+      const auto mask = masks[0][i].to(torch::kUInt8).to(torch::kCPU);
+      cv::Mat masked_image;
+      curr_frame.image.copyTo(
+          masked_image,
+          cv::Mat(curr_frame.image.size(), CV_8U, mask.data_ptr<uint8_t>()));
+      cv::imwrite("masked_image_" + std::to_string(0) + "_" +
+                      std::to_string(i) + ".jpg",
+                  masked_image);
+    }
+  }
+#endif
+
+  m_frames_v.push_back(std::move(curr_frame));
+}
+
+void SAMPublisher::ProjectGraspCenter(
+    const std::vector<Eigen::Vector3d> &finger_tips,
+    Eigen::Vector2d &grasp_center) {
+  Eigen::Vector3d point_w = Eigen::Vector3d::Zero();
+  for (const auto &finger_tip : finger_tips) {
+    point_w += finger_tip;
+  }
+
+  point_w /= finger_tips.size();
+  point_w[2] += 0.03;
+
+  Eigen::Vector3d point_c =
+      m_pose_wc.leftCols<3>().transpose() * (point_w - m_pose_wc.col(3));
+
+  grasp_center = point_c.head<2>() / point_c[2];
+  grasp_center[0] = -m_intrinsics[0] * grasp_center[0] + m_intrinsics[2];
+  grasp_center[1] = m_intrinsics[1] * grasp_center[1] + m_intrinsics[3];
+}
+
+void SAMPublisher::GetFingerTips(const Eigen::VectorXd &joint_angles,
+                                 std::vector<Eigen::Vector3d> &finger_tips) {
   gum::utils::GetFingerTips(m_robot_model, joint_angles, m_base_pose,
                             m_finger_offset, m_finger_ids, finger_tips);
 }
@@ -285,12 +352,18 @@ void SAMPublisher::CallBack(
     const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
     const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) {
-  this->AddFrame(color_msg, depth_msg);
+  this->AddFrame(color_msg, depth_msg, joint_msg);
 
-  //   cv::imwrite(std::string(color_ptr->header.frame_id) + ".jpg",
-  //               m_dataset->GetFrames().back().image);
-  if (m_dataset->GetNumFrames() >= 1000) {
-    m_dataset->Clear();
+  if (m_frames_v.size() == 0) {
+    Initialize(m_realsense->GetFrames().back().image,
+               m_realsense->GetFrames().back().depth, m_joint_angles_v.back());
+  }
+
+  if (m_realsense->GetNumFrames() >= 1000) {
+    m_realsense->Clear();
+  }
+  if (m_joint_angles_v.size() >= 1000) {
+    m_joint_angles_v.clear();
   }
 }
 } // namespace perception

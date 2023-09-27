@@ -26,8 +26,8 @@ public:
   using Frame = gum::perception::feature::Frame;
   SAMPublisher(const std::string &node_name);
 
-  Frame &Initialize(const cv::Mat &image, const cv::Mat &depth,
-                    const cv::Mat &mask);
+  void Initialize(const cv::Mat &image, const cv::Mat &depth,
+                  const Eigen::VectorXd &joint_angles);
   void Process(const Frame &prev_frame, Frame &curr_frame);
 
 protected:
@@ -51,9 +51,11 @@ protected:
   std::shared_ptr<gum::perception::feature::SuperPoint> m_superpoint;
   std::shared_ptr<gum::perception::feature::LightGlue> m_lightglue;
   std::shared_ptr<gum::perception::bbox::OSTrack> m_ostracker;
+
   std::shared_ptr<gum::perception::dataset::RealSenseDataset<
       gum::perception::dataset::Device::GPU>>
-      m_dataset;
+      m_realsense;
+  std::vector<Eigen::VectorXd> m_joint_angles_v;
 
   int m_device;
   int m_height, m_width;
@@ -68,14 +70,21 @@ protected:
   Eigen::Matrix<double, 3, 4> m_base_pose;
   Eigen::Vector3d m_finger_offset;
   std::vector<int> m_finger_ids;
+  Eigen::Matrix<double, 3, 4> m_pose_wc;
+
+  std::vector<Frame> m_frames_v;
 
 private:
   void
   AddFrame(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
-           const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg);
-  void
-  GetFingerTips(const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg,
-                std::vector<Eigen::Vector3d> &finger_tips);
+           const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
+           const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
+
+  void ProjectGraspCenter(const std::vector<Eigen::Vector3d> &finger_tips,
+                          Eigen::Vector2d &grasp_center);
+
+  void GetFingerTips(const Eigen::VectorXd &joint_angles,
+                     std::vector<Eigen::Vector3d> &finger_tips);
 
   void
   CallBack(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
