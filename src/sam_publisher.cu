@@ -14,6 +14,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
     : rclcpp::Node(node_name) {
   igraph_rng_seed(igraph_rng_default(), 0);
 
+  // Declare Parameters
   this->declare_parameter("device", rclcpp::PARAMETER_INTEGER);
   this->declare_parameter("height", rclcpp::PARAMETER_INTEGER);
   this->declare_parameter("width", rclcpp::PARAMETER_INTEGER);
@@ -21,6 +22,12 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   this->declare_parameter("depth_scale", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("min_depth", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("max_depth", rclcpp::PARAMETER_DOUBLE);
+  this->declare_parameter("match_graph_delta", rclcpp::PARAMETER_DOUBLE);
+  this->declare_parameter("match_graph_tolerance", rclcpp::PARAMETER_DOUBLE);
+  this->declare_parameter("leiden_max_iters", rclcpp::PARAMETER_INTEGER);
+  this->declare_parameter("leiden_beta", rclcpp::PARAMETER_DOUBLE);
+  this->declare_parameter("leiden_resolution", rclcpp::PARAMETER_DOUBLE);
+  this->declare_parameter("outlier_tolerance", rclcpp::PARAMETER_DOUBLE);
 
   this->declare_parameter("color_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("depth_topic", rclcpp::PARAMETER_STRING);
@@ -33,6 +40,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   this->declare_parameter("ostrack", rclcpp::PARAMETER_STRING);
   this->declare_parameter("trt_engine_cache", rclcpp::PARAMETER_STRING);
 
+  // Get Parameters
   m_device = this->get_parameter("device").as_int();
   m_height = this->get_parameter("height").as_int();
   m_width = this->get_parameter("width").as_int();
@@ -42,6 +50,14 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   m_depth_scale = this->get_parameter("depth_scale").as_double();
   m_min_depth = this->get_parameter("min_depth").as_double();
   m_max_depth = this->get_parameter("max_depth").as_double();
+  m_graph_params.delta = this->get_parameter("match_graph_delta").as_double();
+  m_graph_params.tolerance =
+      this->get_parameter("match_graph_tolerance").as_double();
+  m_leiden_params.max_iters = this->get_parameter("leiden_max_iters").as_int();
+  m_leiden_params.beta = this->get_parameter("leiden_beta").as_double();
+  m_leiden_params.resolution =
+      this->get_parameter("leiden_resolution").as_double();
+  m_outlier_tolerance = this->get_parameter("outlier_tolerance").as_double();
   const std::string color_topic =
       this->get_parameter("color_topic").as_string();
   const std::string depth_topic =

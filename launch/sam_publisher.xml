@@ -8,6 +8,12 @@
         <param name="depth_scale" value="0.000607" />
         <param name="min_depth" value="0.15" />
         <param name="max_depth" value="0.85" />
+        <param name="match_graph_delta" value="1e-2" />
+        <param name="match_graph_tolerance" value="0.998" />
+        <param name="leiden_max_iters" value="5" />
+        <param name="leiden_beta" value="1e-3" />
+        <param name="leiden_resolution" value="1.15" />
+        <param name="outlier_tolerance" value="2e-3" />
         <param name="model_path" value="/home/taoshaf/Documents/GUM/gum/labs/cpp/models/" />
         <param name="color_topic" value="/realsense_front_left/color" />
         <param name="depth_topic" value="/realsense_front_left/depth" />
