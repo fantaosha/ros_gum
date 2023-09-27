@@ -4,7 +4,9 @@
 #include <gum/perception/feature/outlier_rejection.h>
 #include <gum/perception/utils/utils.cuh>
 #include <gum/utils/cuda_utils.cuh>
+#include <gum/utils/kinematics.h>
 #include <gum/utils/utils.h>
+#include <pinocchio/parsers/urdf.hpp>
 
 #include <opencv2/imgproc.hpp>
 
@@ -28,10 +30,15 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   this->declare_parameter("leiden_beta", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("leiden_resolution", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("outlier_tolerance", rclcpp::PARAMETER_DOUBLE);
+  this->declare_parameter("base_pose", rclcpp::PARAMETER_DOUBLE_ARRAY);
+  this->declare_parameter("finger_offset", rclcpp::PARAMETER_DOUBLE_ARRAY);
+  this->declare_parameter("finger_ids", rclcpp::PARAMETER_INTEGER_ARRAY);
 
   this->declare_parameter("color_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("depth_topic", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("joint_state_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("segmentation_topic", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("meta_hand_urdf", rclcpp::PARAMETER_STRING);
   this->declare_parameter("model_path", rclcpp::PARAMETER_STRING);
   this->declare_parameter("sam_encoder", rclcpp::PARAMETER_STRING);
   this->declare_parameter("sam_decoder", rclcpp::PARAMETER_STRING);
@@ -58,12 +65,24 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   m_leiden_params.resolution =
       this->get_parameter("leiden_resolution").as_double();
   m_outlier_tolerance = this->get_parameter("outlier_tolerance").as_double();
+  m_base_pose = Eigen::Map<const Eigen::Matrix<double, 3, 4>>(
+      this->get_parameter("base_pose").as_double_array().data());
+  m_finger_offset = Eigen::Map<const Eigen::Vector3d>(
+      this->get_parameter("finger_offset").as_double_array().data());
+  auto finger_ids = this->get_parameter("finger_ids").as_integer_array();
+  m_finger_ids.resize(finger_ids.size());
+  std::copy(finger_ids.begin(), finger_ids.end(), m_finger_ids.begin());
+
   const std::string color_topic =
       this->get_parameter("color_topic").as_string();
   const std::string depth_topic =
       this->get_parameter("depth_topic").as_string();
+  const std::string joint_state_topic =
+      this->get_parameter("joint_state_topic").as_string();
   const std::string sam_topic =
       this->get_parameter("segmentation_topic").as_string();
+  const std::string meta_hand_urdf =
+      this->get_parameter("meta_hand_urdf").as_string();
   const std::string model_path = this->get_parameter("model_path").as_string();
   const std::string sam_encoder_checkpoint =
       model_path + this->get_parameter("sam_encoder").as_string();
@@ -86,9 +105,12 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   m_depth_subscriber =
       std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
           this, depth_topic);
+  m_joint_subscriber = std::make_shared<
+      message_filters::Subscriber<sensor_msgs::msg::JointState>>(
+      this, joint_state_topic);
   m_synchronizer =
-      std::make_shared<message_filters::Synchronizer<ApproximatePolicy>>(
-          ApproximatePolicy(10), *m_color_subscriber, *m_depth_subscriber);
+      std::make_shared<Synchronizer>(ApproximatePolicy(10), *m_color_subscriber,
+                                     *m_depth_subscriber, *m_joint_subscriber);
   m_synchronizer->registerCallback(&SAMPublisher::CallBack, this);
 
   CHECK_CUDA(cudaSetDevice(m_device));
@@ -108,6 +130,8 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
       m_device, m_height, m_width, m_intrinsics[0], m_intrinsics[1],
       m_intrinsics[2], m_intrinsics[3], m_intrinsics[4], m_intrinsics[5],
       m_intrinsics[6], m_intrinsics[7], m_depth_scale);
+
+  pinocchio::urdf::buildModel(meta_hand_urdf, m_robot_model);
 
   RCLCPP_INFO_STREAM_ONCE(this->get_logger(), "Frontend Publisher Setup");
 }
@@ -230,17 +254,38 @@ void SAMPublisher::Process(const Frame &prev_frame, Frame &curr_frame) {
   curr_frame.mask_gpu = curr_frame.mask_cpu.to(curr_frame.mask_gpu.device());
 }
 
-void SAMPublisher::CallBack(
+void SAMPublisher::AddFrame(
     const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg) {
   cv_bridge::CvImagePtr color_ptr, depth_ptr;
   color_ptr =
       cv_bridge::toCvCopy(color_msg, sensor_msgs::image_encodings::BGR8);
   depth_ptr = cv_bridge::toCvCopy(depth_msg, "16UC1");
+
   double timestamp = double(color_msg->header.stamp.sec) +
                      1e-9 * double(color_msg->header.stamp.nanosec);
   m_dataset->AddFrame(
       {timestamp, std::move(color_ptr->image), std::move(depth_ptr->image)});
+}
+
+void SAMPublisher::GetFingerTips(
+    const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg,
+    std::vector<Eigen::Vector3d> &finger_tips) {
+  Eigen::Map<const Eigen::VectorXd> raw_joint_angles(
+      joint_msg->position.data(), joint_msg->position.size());
+  Eigen::VectorXd joint_angles(m_robot_model.nq);
+  joint_angles.segment<4>(0) = raw_joint_angles.segment<4>(0);
+  joint_angles.segment<4>(4) = raw_joint_angles.segment<4>(12);
+  joint_angles.segment<8>(8) = raw_joint_angles.segment<8>(4);
+  gum::utils::GetFingerTips(m_robot_model, joint_angles, m_base_pose,
+                            m_finger_offset, m_finger_ids, finger_tips);
+}
+
+void SAMPublisher::CallBack(
+    const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
+    const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
+    const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) {
+  this->AddFrame(color_msg, depth_msg);
 
   //   cv::imwrite(std::string(color_ptr->header.frame_id) + ".jpg",
   //               m_dataset->GetFrames().back().image);

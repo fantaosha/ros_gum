@@ -37,8 +37,8 @@ find_package(GUM REQUIRED)
 find_package(igraph REQUIRED)
 find_package(Torch REQUIRED)
 
-add_executable(sam_publisher include/gum_perception/sam_publisher.h src/sam_publisher.cpp src/sam_publisher.cu)
-target_link_libraries(sam_publisher gum::perception ${TORCH_LIBRARIES})
+add_executable(sam_publisher include/gum_perception/sam_publisher.h src/sam_node.cpp src/sam_publisher.cu)
+target_link_libraries(sam_publisher gum ${TORCH_LIBRARIES})
 ament_target_dependencies(sam_publisher rclcpp std_msgs message_filters sensor_msgs cv_bridge)
 
 install(TARGETS sam_publisher DESTINATION lib/${PROJECT_NAME})

@@ -6,6 +6,9 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
+
+#include <pinocchio/algorithm/frames.hpp>
 
 #include <gum/graph/types.hpp>
 #include <gum/perception/bbox/bbox.h>
@@ -29,7 +32,9 @@ public:
 
 protected:
   using ApproximatePolicy = message_filters::sync_policies::ApproximateTime<
-      sensor_msgs::msg::CompressedImage, sensor_msgs::msg::Image>;
+      sensor_msgs::msg::CompressedImage, sensor_msgs::msg::Image,
+      sensor_msgs::msg::JointState>;
+  using Synchronizer = message_filters::Synchronizer<ApproximatePolicy>;
 
   std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::Image>>
       m_segmentation_publisher;
@@ -38,8 +43,9 @@ protected:
       m_color_subscriber;
   std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>>
       m_depth_subscriber;
-  std::shared_ptr<message_filters::Synchronizer<ApproximatePolicy>>
-      m_synchronizer;
+  std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::JointState>>
+      m_joint_subscriber;
+  std::shared_ptr<Synchronizer> m_synchronizer;
 
   std::shared_ptr<gum::perception::segmentation::SAM> m_sam;
   std::shared_ptr<gum::perception::feature::SuperPoint> m_superpoint;
@@ -58,8 +64,23 @@ protected:
   gum::perception::feature::LeidenParameters m_leiden_params;
   float m_outlier_tolerance;
 
-  void CallBack(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color,
-                const sensor_msgs::msg::Image::ConstSharedPtr &depth);
+  pinocchio::Model m_robot_model;
+  Eigen::Matrix<double, 3, 4> m_base_pose;
+  Eigen::Vector3d m_finger_offset;
+  std::vector<int> m_finger_ids;
+
+private:
+  void
+  AddFrame(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
+           const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg);
+  void
+  GetFingerTips(const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg,
+                std::vector<Eigen::Vector3d> &finger_tips);
+
+  void
+  CallBack(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
+           const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
+           const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
 };
 } // namespace perception
 } // namespace gum
