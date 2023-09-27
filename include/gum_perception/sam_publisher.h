@@ -21,8 +21,7 @@ namespace perception {
 class SAMPublisher : public rclcpp::Node {
 public:
   using Frame = gum::perception::feature::Frame;
-  SAMPublisher(const std::string &node_name, const std::string &color_topic,
-               const std::string &depth_topic, const std::string &sam_topic);
+  SAMPublisher(const std::string &node_name);
 
   Frame &Initialize(const cv::Mat &image, const cv::Mat &depth,
                     const cv::Mat &mask);

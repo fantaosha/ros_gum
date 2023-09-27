@@ -9,6 +9,9 @@
         <param name="min_depth" value="0.15" />
         <param name="max_depth" value="0.85" />
         <param name="model_path" value="/home/taoshaf/Documents/GUM/gum/labs/cpp/models/" />
+        <param name="color_topic" value="/realsense_front_left/color" />
+        <param name="depth_topic" value="/realsense_front_left/depth" />
+        <param name="segmentation_topic" value="segmentation" />
         <param name="sam_encoder" value="mobile_sam_encoder.jit" />
         <param name="sam_decoder" value="mobile_sam_decoder.jit" />
         <param name="superpoint" value="superpoint.onnx" />

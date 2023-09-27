@@ -10,10 +10,7 @@
 
 namespace gum {
 namespace perception {
-SAMPublisher::SAMPublisher(const std::string &node_name,
-                           const std::string &color_topic,
-                           const std::string &depth_topic,
-                           const std::string &sam_topic)
+SAMPublisher::SAMPublisher(const std::string &node_name)
     : rclcpp::Node(node_name) {
   igraph_rng_seed(igraph_rng_default(), 0);
 
@@ -24,6 +21,10 @@ SAMPublisher::SAMPublisher(const std::string &node_name,
   this->declare_parameter("depth_scale", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("min_depth", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("max_depth", rclcpp::PARAMETER_DOUBLE);
+
+  this->declare_parameter("color_topic", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("depth_topic", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("segmentation_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("model_path", rclcpp::PARAMETER_STRING);
   this->declare_parameter("sam_encoder", rclcpp::PARAMETER_STRING);
   this->declare_parameter("sam_decoder", rclcpp::PARAMETER_STRING);
@@ -31,19 +32,6 @@ SAMPublisher::SAMPublisher(const std::string &node_name,
   this->declare_parameter("lightglue", rclcpp::PARAMETER_STRING);
   this->declare_parameter("ostrack", rclcpp::PARAMETER_STRING);
   this->declare_parameter("trt_engine_cache", rclcpp::PARAMETER_STRING);
-
-  m_segmentation_publisher =
-      this->create_publisher<sensor_msgs::msg::Image>(sam_topic, 10);
-  m_color_subscriber = std::make_shared<
-      message_filters::Subscriber<sensor_msgs::msg::CompressedImage>>(
-      this, color_topic);
-  m_depth_subscriber =
-      std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
-          this, depth_topic);
-  m_synchronizer =
-      std::make_shared<message_filters::Synchronizer<ApproximatePolicy>>(
-          ApproximatePolicy(10), *m_color_subscriber, *m_depth_subscriber);
-  m_synchronizer->registerCallback(&SAMPublisher::CallBack, this);
 
   m_device = this->get_parameter("device").as_int();
   m_height = this->get_parameter("height").as_int();
@@ -54,11 +42,12 @@ SAMPublisher::SAMPublisher(const std::string &node_name,
   m_depth_scale = this->get_parameter("depth_scale").as_double();
   m_min_depth = this->get_parameter("min_depth").as_double();
   m_max_depth = this->get_parameter("max_depth").as_double();
-
-  RCLCPP_INFO_STREAM_ONCE(this->get_logger(), "Intrinsics "
-                                                  << m_intrinsics.transpose()
-                                                  << std::endl);
-
+  const std::string color_topic =
+      this->get_parameter("color_topic").as_string();
+  const std::string depth_topic =
+      this->get_parameter("depth_topic").as_string();
+  const std::string sam_topic =
+      this->get_parameter("segmentation_topic").as_string();
   const std::string model_path = this->get_parameter("model_path").as_string();
   const std::string sam_encoder_checkpoint =
       model_path + this->get_parameter("sam_encoder").as_string();
@@ -72,6 +61,19 @@ SAMPublisher::SAMPublisher(const std::string &node_name,
       model_path + this->get_parameter("ostrack").as_string();
   const std::string trt_engine_cache_path =
       model_path + this->get_parameter("trt_engine_cache").as_string();
+
+  m_segmentation_publisher =
+      this->create_publisher<sensor_msgs::msg::Image>(sam_topic, 10);
+  m_color_subscriber = std::make_shared<
+      message_filters::Subscriber<sensor_msgs::msg::CompressedImage>>(
+      this, color_topic);
+  m_depth_subscriber =
+      std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
+          this, depth_topic);
+  m_synchronizer =
+      std::make_shared<message_filters::Synchronizer<ApproximatePolicy>>(
+          ApproximatePolicy(10), *m_color_subscriber, *m_depth_subscriber);
+  m_synchronizer->registerCallback(&SAMPublisher::CallBack, this);
 
   CHECK_CUDA(cudaSetDevice(m_device));
   m_handle = std::make_shared<gum::graph::Handle>();
@@ -91,7 +93,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name,
       m_intrinsics[2], m_intrinsics[3], m_intrinsics[4], m_intrinsics[5],
       m_intrinsics[6], m_intrinsics[7], m_depth_scale);
 
-  RCLCPP_INFO_STREAM_ONCE(this->get_logger(), "Segmentation Publisher Setup");
+  RCLCPP_INFO_STREAM_ONCE(this->get_logger(), "Frontend Publisher Setup");
 }
 
 void SAMPublisher::Process(const Frame &prev_frame, Frame &curr_frame) {
@@ -224,6 +226,8 @@ void SAMPublisher::CallBack(
   m_dataset->AddFrame(
       {timestamp, std::move(color_ptr->image), std::move(depth_ptr->image)});
 
+  //   cv::imwrite(std::string(color_ptr->header.frame_id) + ".jpg",
+  //               m_dataset->GetFrames().back().image);
   if (m_dataset->GetNumFrames() >= 1000) {
     m_dataset->Clear();
   }
