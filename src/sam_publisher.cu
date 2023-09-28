@@ -31,6 +31,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   this->declare_parameter("pose_wc", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("finger_offset", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("finger_ids", rclcpp::PARAMETER_INTEGER_ARRAY);
+  this->declare_parameter("save_results", rclcpp::PARAMETER_BOOL);
 
   this->declare_parameter("color_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("depth_topic", rclcpp::PARAMETER_STRING);
@@ -75,6 +76,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   auto finger_ids = this->get_parameter("finger_ids").as_integer_array();
   m_finger_ids.resize(finger_ids.size());
   std::copy(finger_ids.begin(), finger_ids.end(), m_finger_ids.begin());
+  m_save_results = this->get_parameter("save_results").as_bool();
 
   const std::string color_topic =
       this->get_parameter("color_topic").as_string();
@@ -199,7 +201,9 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
 
   m_ostracker->Initialize(curr_frame.image, curr_frame.bbox.cast<float>());
   ExtractKeyPoints(curr_frame, curr_frame.mask_cpu.data_ptr<uint8_t>());
-  WriteFrame(curr_frame);
+  if (m_save_results) {
+    WriteFrame(curr_frame);
+  }
   m_frames_v.push_back(std::move(curr_frame));
 }
 
@@ -317,7 +321,9 @@ void SAMPublisher::Process(const cv::Mat &image, const cv::Mat &depth,
                                              << ": Keypoints has been refined ("
                                              << num_keypoints << "/"
                                              << num_initial_keypoints << ").");
-  WriteFrame(curr_frame);
+  if (m_save_results) {
+    WriteFrame(curr_frame);
+  }
   m_frames_v.push_back(std::move(curr_frame));
 }
 
@@ -486,16 +492,23 @@ void SAMPublisher::WriteFrame(const Frame &frame) {
   cv::Mat image;
   cv::cvtColor(frame.image, image, CV_RGB2BGR);
 
+  const cv::Mat mask(image.size(), CV_8U, frame.mask_cpu.data_ptr<uint8_t>());
+  cv::imwrite("image_" + std::to_string(frame.id) + "_mask.png", mask);
+
   cv::Mat masked_image;
-  image.copyTo(masked_image, cv::Mat(image.size(), CV_8U,
-                                     frame.mask_cpu.data_ptr<uint8_t>()));
-  cv::imwrite("image_" + std::to_string(frame.id) + "_mask.jpg", masked_image);
+  image.copyTo(masked_image, mask);
+  cv::imwrite("image_" + std::to_string(frame.id) + "_masked_color.jpg",
+              masked_image);
+
+  cv::Mat masked_depth;
+  frame.depth.copyTo(masked_depth, mask);
+  cv::imwrite("image_" + std::to_string(frame.id) + "_masked_depth.png",
+              masked_depth);
 
   std::vector<cv::KeyPoint> cv_keypoints_v;
   for (const auto &keypoint : frame.keypoints_v) {
     cv_keypoints_v.push_back({keypoint[0], keypoint[1], 1});
   }
-
   cv::Mat masked_image_with_keypoints;
   cv::drawKeypoints(masked_image, cv_keypoints_v, masked_image_with_keypoints,
                     cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
@@ -511,12 +524,10 @@ void SAMPublisher::WriteFrame(const Frame &frame) {
 void SAMPublisher::Publish(const Frame &frame,
                            const std_msgs::msg::Header &header) {
   cv::Mat masked_depth;
-  cv::copyTo(
-      frame.depth, masked_depth,
-      cv::Mat(frame.depth.size(), CV_8U, frame.mask_cpu.data_ptr<uint8_t>()));
+  frame.depth.copyTo(masked_depth, cv::Mat(frame.depth.size(), CV_8U,
+                                           frame.mask_cpu.data_ptr<uint8_t>()));
   sensor_msgs::msg::Image::SharedPtr msg =
       cv_bridge::CvImage(header, "16UC1", masked_depth).toImageMsg();
-
   m_segmentation_publisher->publish(*msg);
 }
 

@@ -76,6 +76,7 @@ protected:
   std::vector<Eigen::Vector3f> m_initial_point_clouds_v;
 
   std::vector<Frame> m_frames_v;
+  bool m_save_results;
 
 private:
   void Initialize(const cv::Mat &image, const cv::Mat &depth,
