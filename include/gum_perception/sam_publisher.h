@@ -4,7 +4,6 @@
 #include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/synchronizer.h>
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 
@@ -28,14 +27,14 @@ public:
 
 protected:
   using ApproximatePolicy = message_filters::sync_policies::ApproximateTime<
-      sensor_msgs::msg::CompressedImage, sensor_msgs::msg::Image,
+      sensor_msgs::msg::Image, sensor_msgs::msg::Image,
       sensor_msgs::msg::JointState>;
   using Synchronizer = message_filters::Synchronizer<ApproximatePolicy>;
 
   std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::Image>>
       m_segmentation_publisher;
   std::shared_ptr<
-      message_filters::Subscriber<sensor_msgs::msg::CompressedImage>>
+      message_filters::Subscriber<sensor_msgs::msg::Image>>
       m_color_subscriber;
   std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>>
       m_depth_subscriber;
@@ -86,7 +85,7 @@ private:
   void WarmUp();
 
   void
-  AddFrame(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
+  AddFrame(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
            const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
            const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
   void ProjectGraspCenter(const std::vector<Eigen::Vector3d> &finger_tips,
@@ -98,7 +97,7 @@ private:
   void WriteFrame(const Frame &frame);
   void Publish(const Frame &frame, const std_msgs::msg::Header &header);
   void
-  CallBack(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
+  CallBack(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
            const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
            const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
 };

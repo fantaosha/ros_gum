@@ -113,7 +113,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   m_segmentation_publisher =
       this->create_publisher<sensor_msgs::msg::Image>(sam_topic, 10);
   m_color_subscriber = std::make_shared<
-      message_filters::Subscriber<sensor_msgs::msg::CompressedImage>>(
+      message_filters::Subscriber<sensor_msgs::msg::Image>>(
       this, color_topic);
   m_depth_subscriber =
       std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
@@ -122,7 +122,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
       message_filters::Subscriber<sensor_msgs::msg::JointState>>(
       this, joint_state_topic);
   m_synchronizer =
-      std::make_shared<Synchronizer>(ApproximatePolicy(10), *m_color_subscriber,
+      std::make_shared<Synchronizer>(ApproximatePolicy(20), *m_color_subscriber,
                                      *m_depth_subscriber, *m_joint_subscriber);
   m_synchronizer->registerCallback(
       std::bind(&SAMPublisher::CallBack, this, _1, _2, _3));
@@ -382,7 +382,7 @@ void SAMPublisher::WarmUp() {
 }
 
 void SAMPublisher::AddFrame(
-    const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
+    const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
     const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) {
   cv_bridge::CvImagePtr color_ptr, depth_ptr;
@@ -532,7 +532,7 @@ void SAMPublisher::Publish(const Frame &frame,
 }
 
 void SAMPublisher::CallBack(
-    const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
+    const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
     const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) {
   this->AddFrame(color_msg, depth_msg, joint_msg);
