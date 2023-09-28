@@ -13,8 +13,6 @@ namespace gum {
 namespace perception {
 SAMPublisher::SAMPublisher(const std::string &node_name)
     : rclcpp::Node(node_name) {
-  igraph_rng_seed(igraph_rng_default(), 0);
-
   // Declare Parameters
   this->declare_parameter("device", rclcpp::PARAMETER_INTEGER);
   this->declare_parameter("height", rclcpp::PARAMETER_INTEGER);
@@ -106,6 +104,10 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   const std::string trt_engine_cache_path =
       model_path + this->get_parameter("trt_engine_cache").as_string();
 
+  using std::placeholders::_1;
+  using std::placeholders::_2;
+  using std::placeholders::_3;
+
   m_segmentation_publisher =
       this->create_publisher<sensor_msgs::msg::Image>(sam_topic, 10);
   m_color_subscriber = std::make_shared<
@@ -120,7 +122,10 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   m_synchronizer =
       std::make_shared<Synchronizer>(ApproximatePolicy(10), *m_color_subscriber,
                                      *m_depth_subscriber, *m_joint_subscriber);
-  m_synchronizer->registerCallback(&SAMPublisher::CallBack, this);
+  m_synchronizer->registerCallback(
+      std::bind(&SAMPublisher::CallBack, this, _1, _2, _3));
+
+  igraph_rng_seed(igraph_rng_default(), 0);
 
   CHECK_CUDA(cudaSetDevice(m_device));
   m_handle = std::make_shared<gum::graph::Handle>();
@@ -145,19 +150,19 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   pinocchio::urdf::buildModel(meta_hand_urdf, m_robot_model);
 
   WarmUp();
-  RCLCPP_INFO_STREAM_ONCE(this->get_logger(),
-                          "-------------------------------------------------");
-  RCLCPP_INFO_STREAM_ONCE(this->get_logger(), "GUM frontend has been setup.");
-  RCLCPP_INFO_STREAM_ONCE(this->get_logger(),
-                          "-------------------------------------------------");
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "-------------------------------------------------");
+  RCLCPP_INFO_STREAM(this->get_logger(), "GUM frontend has been setup.");
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "-------------------------------------------------");
 }
 
 void SAMPublisher::WarmUp() {
-  RCLCPP_INFO_STREAM_ONCE(this->get_logger(),
-                          "-------------------------------------------------");
-  RCLCPP_INFO_STREAM_ONCE(this->get_logger(), "GUM frontend starts to warm up");
-  RCLCPP_INFO_STREAM_ONCE(this->get_logger(),
-                          "-------------------------------------------------");
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "-------------------------------------------------");
+  RCLCPP_INFO_STREAM(this->get_logger(), "GUM frontend starts to warm up");
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "-------------------------------------------------");
   const std::string test_image_path =
       this->get_parameter("test_image").as_string();
 
@@ -248,37 +253,7 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
 
   m_ostracker->Initialize(curr_frame.image, curr_frame.bbox.cast<float>());
   ExtractKeyPoints(curr_frame, curr_frame.mask_cpu.data_ptr<uint8_t>());
-
-#if 1
-  {
-    auto bbox_image = curr_frame.image.clone();
-    cv::rectangle(bbox_image, cv::Point(curr_frame.bbox[0], curr_frame.bbox[1]),
-                  cv::Point(curr_frame.bbox[2], curr_frame.bbox[3]),
-                  cv::Scalar(0, 0, 255), 1, cv::LINE_8);
-    cv::imwrite("image_" + std::to_string(curr_frame.id) + "_bbox.jpg",
-                bbox_image);
-
-    cv::Mat masked_image;
-    curr_frame.image.copyTo(masked_image,
-                            cv::Mat(curr_frame.image.size(), CV_8U,
-                                    curr_frame.mask_cpu.data_ptr<uint8_t>()));
-    cv::imwrite("image_" + std::to_string(curr_frame.id) + "_mask.jpg",
-                masked_image);
-
-    std::vector<cv::KeyPoint> cv_keypoints_v;
-    for (const auto &keypoint : curr_frame.keypoints_v) {
-      cv_keypoints_v.push_back({keypoint[0], keypoint[1], 1});
-    }
-
-    cv::Mat masked_image_with_keypoints;
-    cv::drawKeypoints(masked_image, cv_keypoints_v, masked_image_with_keypoints,
-                      cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
-
-    cv::imwrite("image_" + std::to_string(curr_frame.id) + "_keypoints.jpg",
-                masked_image_with_keypoints);
-  }
-#endif
-
+  WriteFrame(curr_frame);
   m_frames_v.push_back(std::move(curr_frame));
 }
 
@@ -316,6 +291,9 @@ void SAMPublisher::Process(const cv::Mat &image, const cv::Mat &depth,
                                       shrinked_mask_cpu.data_ptr<uint8_t>(),
                                       shrinked_radius);
 
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id
+                              << ": SuperPoint has extracted keypoints.");
   ExtractKeyPoints(curr_frame, extended_mask_cpu.data_ptr<uint8_t>());
 #if 0
   cv::Mat cropped_image;
@@ -361,6 +339,9 @@ void SAMPublisher::Process(const cv::Mat &image, const cv::Mat &depth,
                      prev_frame.descriptors_v, curr_frame.descriptors_v,
                      initial_matches_v, match_scores_v);
   int num_initial_matches = initial_matches_v.size();
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id << ": LightGlue has matched "
+                              << num_initial_matches << " pairs of keypoints.");
   d_initial_matches_v.resize(2 * num_initial_matches);
   gum::utils::HostArrayOfMatrixToDeviceMatrixOfArray(initial_matches_v,
                                                      d_initial_matches_v);
@@ -372,6 +353,10 @@ void SAMPublisher::Process(const cv::Mat &image, const cv::Mat &depth,
       prev_frame.point_clouds_v, curr_frame.point_clouds_v, d_initial_matches_v,
       d_matches_v);
   int num_matches = d_matches_v.size() / 2;
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id << ": Outlier rejection keeps "
+                              << num_matches << "/" << num_initial_matches
+                              << " pairs of keypoints.");
   Eigen::Matrix<float, 3, 4> relative_pose;
   gum::perception::feature::EstimateRelativePose(
       *m_handle, prev_frame.point_clouds_v.size() / 3,
@@ -397,6 +382,8 @@ void SAMPublisher::Process(const cv::Mat &image, const cv::Mat &depth,
   m_mobile_sam->SetImage(curr_frame.image);
   m_mobile_sam->Query(point_coords_v, point_labels_v, init_bbox, masks, scores,
                       logits);
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id << ": SAM has segmented image.");
   curr_frame.mask_gpu = masks[0][1].to(torch::kUInt8);
   curr_frame.mask_cpu = curr_frame.mask_gpu.to(torch::kCPU);
   gum::perception::utils::FilterMaskByDepth(
@@ -406,38 +393,20 @@ void SAMPublisher::Process(const cv::Mat &image, const cv::Mat &depth,
                                      curr_frame.mask_cpu.data_ptr<uint8_t>());
   curr_frame.mask_gpu = curr_frame.mask_cpu.to(curr_frame.mask_gpu.device());
 
-#if 1
-  {
-    auto bbox_image = curr_frame.image.clone();
-    cv::rectangle(bbox_image, cv::Point(curr_frame.bbox[0], curr_frame.bbox[1]),
-                  cv::Point(curr_frame.bbox[2], curr_frame.bbox[3]),
-                  cv::Scalar(0, 0, 255), 1, cv::LINE_8);
-    cv::imwrite("image_" + std::to_string(curr_frame.id) + "_bbox.jpg",
-                bbox_image);
-
-    cv::Mat masked_image;
-    curr_frame.image.copyTo(masked_image,
-                            cv::Mat(curr_frame.image.size(), CV_8U,
-                                    curr_frame.mask_cpu.data_ptr<uint8_t>()));
-    cv::imwrite("image_" + std::to_string(curr_frame.id) + "_mask.jpg",
-                masked_image);
-
-    std::vector<cv::KeyPoint> cv_keypoints_v;
-    for (const auto &keypoint : curr_frame.keypoints_v) {
-      cv_keypoints_v.push_back({keypoint[0], keypoint[1], 1});
-    }
-
-    cv::Mat masked_image_with_keypoints;
-    cv::drawKeypoints(masked_image, cv_keypoints_v, masked_image_with_keypoints,
-                      cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
-
-    cv::imwrite("image_" + std::to_string(curr_frame.id) + "_keypoints.jpg",
-                masked_image_with_keypoints);
-  }
-#endif
-
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id
+                              << ": Segmentation has been refined.");
   // Refine Keypoints
+  int num_initial_keypoints = curr_frame.keypoints_v.size();
   RefineKeyPoints(curr_frame);
+  int num_keypoints = curr_frame.keypoints_v.size();
+  RCLCPP_INFO_STREAM(this->get_logger(), "Frame "
+                                             << curr_frame.id
+                                             << ": Keypoints has been refined ("
+                                             << num_keypoints << "/"
+                                             << num_initial_keypoints << ").");
+  WriteFrame(curr_frame);
+  m_frames_v.push_back(std::move(curr_frame));
 }
 
 void SAMPublisher::AddFrame(
@@ -541,6 +510,32 @@ void SAMPublisher::RefineKeyPoints(Frame &curr_frame) {
       curr_frame.keypoints_v, curr_frame.point_clouds_v);
 }
 
+void SAMPublisher::WriteFrame(const Frame &frame) {
+  cv::Mat image;
+  cv::cvtColor(frame.image, image, CV_RGB2BGR);
+
+  cv::Mat masked_image;
+  image.copyTo(masked_image, cv::Mat(image.size(), CV_8U,
+                                     frame.mask_cpu.data_ptr<uint8_t>()));
+  cv::imwrite("image_" + std::to_string(frame.id) + "_mask.jpg", masked_image);
+
+  std::vector<cv::KeyPoint> cv_keypoints_v;
+  for (const auto &keypoint : frame.keypoints_v) {
+    cv_keypoints_v.push_back({keypoint[0], keypoint[1], 1});
+  }
+
+  cv::Mat masked_image_with_keypoints;
+  cv::drawKeypoints(masked_image, cv_keypoints_v, masked_image_with_keypoints,
+                    cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
+  cv::imwrite("image_" + std::to_string(frame.id) + "_keypoints.jpg",
+              masked_image_with_keypoints);
+
+  cv::rectangle(image, cv::Point(frame.bbox[0], frame.bbox[1]),
+                cv::Point(frame.bbox[2], frame.bbox[3]), cv::Scalar(0, 0, 255),
+                1, cv::LINE_8);
+  cv::imwrite("image_" + std::to_string(frame.id) + "_bbox.jpg", image);
+}
+
 void SAMPublisher::GetFingerTips(const Eigen::VectorXd &joint_angles,
                                  std::vector<Eigen::Vector3d> &finger_tips) {
   gum::utils::GetFingerTips(m_robot_model, joint_angles, m_base_pose,
@@ -551,11 +546,15 @@ void SAMPublisher::CallBack(
     const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
     const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) {
+#if 1
   this->AddFrame(color_msg, depth_msg, joint_msg);
-
-  static int n = 0;
-  RCLCPP_INFO_STREAM_ONCE(this->get_logger(), "Start Frame " << n);
-
+  RCLCPP_INFO_STREAM(
+      this->get_logger(),
+      "=========================================================");
+  RCLCPP_INFO_STREAM(this->get_logger(), "Frame " << m_frames_v.size());
+  RCLCPP_INFO_STREAM(
+      this->get_logger(),
+      "---------------------------------------------------------");
   if (m_frames_v.size() == 0) {
     Initialize(m_realsense->GetFrames().back().image,
                m_realsense->GetFrames().back().depth, m_joint_angles_v.back());
@@ -563,14 +562,17 @@ void SAMPublisher::CallBack(
     Process(m_realsense->GetFrames().back().image,
             m_realsense->GetFrames().back().depth, m_joint_angles_v.back());
   }
-  RCLCPP_INFO_STREAM_ONCE(this->get_logger(), "Complete Frame " << n++);
-
   //   if (m_realsense->GetNumFrames() >= 1000) {
   //     m_realsense->Clear();
   //   }
   //   if (m_joint_angles_v.size() >= 1000) {
   //     m_joint_angles_v.clear();
   //   }
+#else
+  RCLCPP_INFO(this->get_logger(), "I heard: '%d', '%d' and '%f'",
+              (int)color_msg->data.size(), (int)depth_msg->data.size(),
+              double(joint_msg->header.stamp.sec));
+#endif
 }
 } // namespace perception
 } // namespace gum

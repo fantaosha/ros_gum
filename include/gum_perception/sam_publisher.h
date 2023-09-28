@@ -81,7 +81,6 @@ protected:
                   const Eigen::VectorXd &joint_angles);
   void Process(const cv::Mat &image, const cv::Mat &depth,
                const Eigen::VectorXd &joint_angles);
-
   void WarmUp();
 
 private:
@@ -89,16 +88,13 @@ private:
   AddFrame(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
            const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
            const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
-
   void ProjectGraspCenter(const std::vector<Eigen::Vector3d> &finger_tips,
                           Eigen::Vector2d &grasp_center);
-
   void GetFingerTips(const Eigen::VectorXd &joint_angles,
                      std::vector<Eigen::Vector3d> &finger_tips);
-
   void ExtractKeyPoints(Frame &frame, const uint8_t *mask_ptr);
   void RefineKeyPoints(Frame &frame);
-
+  void WriteFrame(const Frame &frame);
   void
   CallBack(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
            const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
