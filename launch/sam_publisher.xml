@@ -23,8 +23,10 @@
         <param name="depth_topic" value="/realsense_front_left/depth" />
         <param name="joint_state_topic" value="/allegro/joint_state" />
         <param name="segmentation_topic" value="segmentation" />
-        <param name="sam_encoder" value="mobile_sam_encoder.jit" />
-        <param name="sam_decoder" value="mobile_sam_decoder.jit" />
+        <param name="sam_encoder" value="sam_vit_l_encoder.jit" />
+        <param name="sam_decoder" value="sam_vit_l_decoder.jit" />
+        <param name="mobile_sam_encoder" value="mobile_sam_encoder.jit" />
+        <param name="mobile_sam_decoder" value="mobile_sam_decoder.jit" />
         <param name="superpoint" value="superpoint.onnx" />
         <param name="lightglue" value="superpoint_lightglue.onnx" />
         <param name="ostrack" value="ostracker.onnx" />

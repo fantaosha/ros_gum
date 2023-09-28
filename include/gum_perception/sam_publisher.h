@@ -48,6 +48,7 @@ protected:
   std::shared_ptr<Synchronizer> m_synchronizer;
 
   std::shared_ptr<gum::perception::segmentation::SAM> m_sam;
+  std::shared_ptr<gum::perception::segmentation::SAM> m_mobile_sam;
   std::shared_ptr<gum::perception::feature::SuperPoint> m_superpoint;
   std::shared_ptr<gum::perception::feature::LightGlue> m_lightglue;
   std::shared_ptr<gum::perception::bbox::OSTrack> m_ostracker;
@@ -72,6 +73,11 @@ protected:
   std::vector<int> m_finger_ids;
   Eigen::Matrix<double, 3, 4> m_pose_wc;
 
+  std::vector<Eigen::Vector2f> m_initial_keypoints_v;
+  std::vector<float> m_initial_keypoint_scores_v;
+  std::vector<Eigen::Vector<float, 256>> m_initial_descriptors_v;
+  std::vector<Eigen::Vector2f> m_initial_normalized_keypoints_v;
+
   std::vector<Frame> m_frames_v;
 
 private:
@@ -85,6 +91,8 @@ private:
 
   void GetFingerTips(const Eigen::VectorXd &joint_angles,
                      std::vector<Eigen::Vector3d> &finger_tips);
+
+  void ExtractKeyPoints(Frame &frame);
 
   void
   CallBack(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
