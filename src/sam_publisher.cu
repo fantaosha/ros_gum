@@ -157,60 +157,6 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
                      "-------------------------------------------------");
 }
 
-void SAMPublisher::WarmUp() {
-  RCLCPP_INFO_STREAM(this->get_logger(),
-                     "-------------------------------------------------");
-  RCLCPP_INFO_STREAM(this->get_logger(), "GUM frontend starts to warm up");
-  RCLCPP_INFO_STREAM(this->get_logger(),
-                     "-------------------------------------------------");
-  const std::string test_image_path =
-      this->get_parameter("test_image").as_string();
-
-  cv::Mat test_image = cv::imread(test_image_path, cv::IMREAD_UNCHANGED);
-  cv::cvtColor(test_image, test_image, cv::COLOR_BGR2RGB);
-
-  int height = test_image.rows;
-  int width = test_image.cols;
-
-  std::vector<Eigen::Vector2f> point_coords_v{{0.5f * width, 0.5f * height}};
-  Eigen::Vector4f bbox = {point_coords_v[0][0] - 0.2f * width,
-                          point_coords_v[0][1] - 0.2f * height,
-                          point_coords_v[0][0] + 0.2f * width,
-                          point_coords_v[0][1] + 0.2f * height};
-  std::vector<float> point_labels_v(point_coords_v.size(), 1.0f);
-  torch::Tensor masks, scores, logits;
-  for (int i = 0; i < 5; i++) {
-    m_mobile_sam->SetImage(test_image);
-    m_mobile_sam->Query(point_coords_v, point_labels_v, bbox, masks, scores,
-                        logits);
-    m_sam->SetImage(test_image);
-    m_sam->Query(point_coords_v, point_labels_v, bbox, masks, scores, logits);
-  }
-
-  m_ostracker->Initialize(test_image, bbox);
-  for (int i = 0; i < 10; i++) {
-    Eigen::Vector4f target_bbox;
-    m_ostracker->Track(test_image, bbox, target_bbox);
-    m_mobile_sam->SetImage(test_image);
-    m_mobile_sam->Query(point_coords_v, point_labels_v, bbox, masks, scores,
-                        logits);
-
-    cv::Mat cropped_image =
-        test_image(cv::Range(bbox[1], bbox[3]), cv::Range(bbox[0], bbox[2]));
-    cv::cvtColor(cropped_image, cropped_image, cv::COLOR_RGB2GRAY);
-    m_superpoint->Extract(cropped_image, m_initial_keypoints_v,
-                          m_initial_normalized_keypoints_v,
-                          m_initial_keypoint_scores_v, m_initial_descriptors_v);
-
-    std::vector<float> match_scores_v;
-    std::vector<Eigen::Vector2i> initial_matches_v;
-    m_lightglue->Match(m_initial_normalized_keypoints_v,
-                       m_initial_normalized_keypoints_v,
-                       m_initial_descriptors_v, m_initial_descriptors_v,
-                       initial_matches_v, match_scores_v);
-  }
-}
-
 void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
                               const Eigen::VectorXd &joint_angles) {
   Frame curr_frame;
@@ -409,6 +355,60 @@ void SAMPublisher::Process(const cv::Mat &image, const cv::Mat &depth,
   m_frames_v.push_back(std::move(curr_frame));
 }
 
+void SAMPublisher::WarmUp() {
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "-------------------------------------------------");
+  RCLCPP_INFO_STREAM(this->get_logger(), "GUM frontend starts to warm up");
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "-------------------------------------------------");
+  const std::string test_image_path =
+      this->get_parameter("test_image").as_string();
+
+  cv::Mat test_image = cv::imread(test_image_path, cv::IMREAD_UNCHANGED);
+  cv::cvtColor(test_image, test_image, cv::COLOR_BGR2RGB);
+
+  int height = test_image.rows;
+  int width = test_image.cols;
+
+  std::vector<Eigen::Vector2f> point_coords_v{{0.5f * width, 0.5f * height}};
+  Eigen::Vector4f bbox = {point_coords_v[0][0] - 0.2f * width,
+                          point_coords_v[0][1] - 0.2f * height,
+                          point_coords_v[0][0] + 0.2f * width,
+                          point_coords_v[0][1] + 0.2f * height};
+  std::vector<float> point_labels_v(point_coords_v.size(), 1.0f);
+  torch::Tensor masks, scores, logits;
+  for (int i = 0; i < 5; i++) {
+    m_mobile_sam->SetImage(test_image);
+    m_mobile_sam->Query(point_coords_v, point_labels_v, bbox, masks, scores,
+                        logits);
+    m_sam->SetImage(test_image);
+    m_sam->Query(point_coords_v, point_labels_v, bbox, masks, scores, logits);
+  }
+
+  m_ostracker->Initialize(test_image, bbox);
+  for (int i = 0; i < 10; i++) {
+    Eigen::Vector4f target_bbox;
+    m_ostracker->Track(test_image, bbox, target_bbox);
+    m_mobile_sam->SetImage(test_image);
+    m_mobile_sam->Query(point_coords_v, point_labels_v, bbox, masks, scores,
+                        logits);
+
+    cv::Mat cropped_image =
+        test_image(cv::Range(bbox[1], bbox[3]), cv::Range(bbox[0], bbox[2]));
+    cv::cvtColor(cropped_image, cropped_image, cv::COLOR_RGB2GRAY);
+    m_superpoint->Extract(cropped_image, m_initial_keypoints_v,
+                          m_initial_normalized_keypoints_v,
+                          m_initial_keypoint_scores_v, m_initial_descriptors_v);
+
+    std::vector<float> match_scores_v;
+    std::vector<Eigen::Vector2i> initial_matches_v;
+    m_lightglue->Match(m_initial_normalized_keypoints_v,
+                       m_initial_normalized_keypoints_v,
+                       m_initial_descriptors_v, m_initial_descriptors_v,
+                       initial_matches_v, match_scores_v);
+  }
+}
+
 void SAMPublisher::AddFrame(
     const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
@@ -448,6 +448,12 @@ void SAMPublisher::ProjectGraspCenter(
   grasp_center = point_c.head<2>() / point_c[2];
   grasp_center[0] = -m_intrinsics[0] * grasp_center[0] + m_intrinsics[2];
   grasp_center[1] = m_intrinsics[1] * grasp_center[1] + m_intrinsics[3];
+}
+
+void SAMPublisher::GetFingerTips(const Eigen::VectorXd &joint_angles,
+                                 std::vector<Eigen::Vector3d> &finger_tips) {
+  gum::utils::GetFingerTips(m_robot_model, joint_angles, m_base_pose,
+                            m_finger_offset, m_finger_ids, finger_tips);
 }
 
 void SAMPublisher::ExtractKeyPoints(Frame &curr_frame,
@@ -534,12 +540,6 @@ void SAMPublisher::WriteFrame(const Frame &frame) {
                 cv::Point(frame.bbox[2], frame.bbox[3]), cv::Scalar(0, 0, 255),
                 1, cv::LINE_8);
   cv::imwrite("image_" + std::to_string(frame.id) + "_bbox.jpg", image);
-}
-
-void SAMPublisher::GetFingerTips(const Eigen::VectorXd &joint_angles,
-                                 std::vector<Eigen::Vector3d> &finger_tips) {
-  gum::utils::GetFingerTips(m_robot_model, joint_angles, m_base_pose,
-                            m_finger_offset, m_finger_ids, finger_tips);
 }
 
 void SAMPublisher::CallBack(
