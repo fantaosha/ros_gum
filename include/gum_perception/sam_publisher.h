@@ -26,10 +26,6 @@ public:
   using Frame = gum::perception::feature::Frame;
   SAMPublisher(const std::string &node_name);
 
-  void Initialize(const cv::Mat &image, const cv::Mat &depth,
-                  const Eigen::VectorXd &joint_angles);
-  void Process(const Frame &prev_frame, Frame &curr_frame);
-
 protected:
   using ApproximatePolicy = message_filters::sync_policies::ApproximateTime<
       sensor_msgs::msg::CompressedImage, sensor_msgs::msg::Image,
@@ -77,8 +73,16 @@ protected:
   std::vector<float> m_initial_keypoint_scores_v;
   std::vector<Eigen::Vector<float, 256>> m_initial_descriptors_v;
   std::vector<Eigen::Vector2f> m_initial_normalized_keypoints_v;
+  std::vector<Eigen::Vector3f> m_initial_point_clouds_v;
 
   std::vector<Frame> m_frames_v;
+
+  void Initialize(const cv::Mat &image, const cv::Mat &depth,
+                  const Eigen::VectorXd &joint_angles);
+  void Process(const cv::Mat &image, const cv::Mat &depth,
+               const Eigen::VectorXd &joint_angles);
+
+  void WarmUp();
 
 private:
   void
@@ -92,7 +96,8 @@ private:
   void GetFingerTips(const Eigen::VectorXd &joint_angles,
                      std::vector<Eigen::Vector3d> &finger_tips);
 
-  void ExtractKeyPoints(Frame &frame);
+  void ExtractKeyPoints(Frame &frame, const uint8_t *mask_ptr);
+  void RefineKeyPoints(Frame &frame);
 
   void
   CallBack(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,

@@ -31,5 +31,6 @@
         <param name="lightglue" value="superpoint_lightglue.onnx" />
         <param name="ostrack" value="ostracker.onnx" />
         <param name="trt_engine_cache" value="trt_engine_cache/" />
+        <param name="test_image" value="/home/taoshaf/ros_ws/data/test_image.jpg" />
     </node>
 </launch>
