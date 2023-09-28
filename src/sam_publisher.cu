@@ -237,45 +237,11 @@ void SAMPublisher::Process(const cv::Mat &image, const cv::Mat &depth,
                                       shrinked_mask_cpu.data_ptr<uint8_t>(),
                                       shrinked_radius);
 
-  RCLCPP_INFO_STREAM(this->get_logger(),
-                     "Frame " << curr_frame.id
-                              << ": SuperPoint has extracted keypoints.");
   ExtractKeyPoints(curr_frame, extended_mask_cpu.data_ptr<uint8_t>());
-#if 0
-  cv::Mat cropped_image;
-  curr_frame
-      .image(cv::Range(curr_frame.bbox[1], curr_frame.bbox[3]),
-             cv::Range(curr_frame.bbox[0], curr_frame.bbox[2]))
-      .copyTo(cropped_image,
-              cv::Mat(curr_frame.image.size(), CV_8U,
-                      extended_mask_cpu.data_ptr<uint8_t>())(
-                  cv::Range(curr_frame.bbox[1], curr_frame.bbox[3]),
-                  cv::Range(curr_frame.bbox[0], curr_frame.bbox[2])));
-  // Initial Mask
-  cv::cvtColor(cropped_image, cropped_image, cv::COLOR_RGB2GRAY);
-  // Extract Keypoints
-  m_superpoint->Extract(cropped_image, m_initial_keypoints_v,
-                        m_initial_normalized_keypoints_v,
-                        m_initial_keypoint_scores_v, m_initial_descriptors_v);
-  for (auto &initial_keypoint : m_initial_keypoints_v) {
-    initial_keypoint += curr_frame.offset;
-  }
-
-  int num_initial_keypoints = m_initial_keypoints_v.size();
-  gum::perception::utils::SelectKeyPointsByDepth(
-      num_initial_keypoints, m_min_depth, m_max_depth, m_depth_scale,
-      curr_frame.depth, m_initial_keypoints_v, m_initial_descriptors_v,
-      m_initial_normalized_keypoints_v, curr_frame.keypoints_v,
-      curr_frame.descriptors_v, curr_frame.normalized_keypoints_v);
-
-  // Point Clouds
-  int num_keypoints = curr_frame.keypoints_v.size();
-  gum::perception::utils::GetPointClouds(
-      num_keypoints, m_intrinsics[0], m_intrinsics[1], m_intrinsics[2],
-      m_intrinsics[3], m_depth_scale, curr_frame.depth, curr_frame.keypoints_v,
-      curr_frame.point_clouds_v);
-#endif
-
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id << ": SuperPoint has extracted "
+                              << curr_frame.keypoints_v.size()
+                              << " keypoints.");
   // Feature Matching
   thrust::device_vector<int> d_initial_matches_v;
   std::vector<float> match_scores_v;
@@ -542,11 +508,22 @@ void SAMPublisher::WriteFrame(const Frame &frame) {
   cv::imwrite("image_" + std::to_string(frame.id) + "_bbox.jpg", image);
 }
 
+void SAMPublisher::Publish(const Frame &frame,
+                           const std_msgs::msg::Header &header) {
+  cv::Mat masked_depth;
+  cv::copyTo(
+      frame.depth, masked_depth,
+      cv::Mat(frame.depth.size(), CV_8U, frame.mask_cpu.data_ptr<uint8_t>()));
+  sensor_msgs::msg::Image::SharedPtr msg =
+      cv_bridge::CvImage(header, "16UC1", masked_depth).toImageMsg();
+
+  m_segmentation_publisher->publish(*msg);
+}
+
 void SAMPublisher::CallBack(
     const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
     const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) {
-#if 1
   this->AddFrame(color_msg, depth_msg, joint_msg);
   RCLCPP_INFO_STREAM(
       this->get_logger(),
@@ -562,17 +539,8 @@ void SAMPublisher::CallBack(
     Process(m_realsense->GetFrames().back().image,
             m_realsense->GetFrames().back().depth, m_joint_angles_v.back());
   }
-  //   if (m_realsense->GetNumFrames() >= 1000) {
-  //     m_realsense->Clear();
-  //   }
-  //   if (m_joint_angles_v.size() >= 1000) {
-  //     m_joint_angles_v.clear();
-  //   }
-#else
-  RCLCPP_INFO(this->get_logger(), "I heard: '%d', '%d' and '%f'",
-              (int)color_msg->data.size(), (int)depth_msg->data.size(),
-              double(joint_msg->header.stamp.sec));
-#endif
+
+  Publish(m_frames_v.back(), depth_msg->header);
 }
 } // namespace perception
 } // namespace gum

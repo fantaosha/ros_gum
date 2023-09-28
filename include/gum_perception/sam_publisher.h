@@ -77,13 +77,13 @@ protected:
 
   std::vector<Frame> m_frames_v;
 
+private:
   void Initialize(const cv::Mat &image, const cv::Mat &depth,
                   const Eigen::VectorXd &joint_angles);
   void Process(const cv::Mat &image, const cv::Mat &depth,
                const Eigen::VectorXd &joint_angles);
   void WarmUp();
 
-private:
   void
   AddFrame(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
            const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
@@ -95,6 +95,7 @@ private:
   void ExtractKeyPoints(Frame &frame, const uint8_t *mask_ptr);
   void RefineKeyPoints(Frame &frame);
   void WriteFrame(const Frame &frame);
+  void Publish(const Frame &frame, const std_msgs::msg::Header &header);
   void
   CallBack(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
            const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
