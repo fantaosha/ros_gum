@@ -32,7 +32,7 @@
         <param name="sam_decoder" value="sam_vit_l_decoder.jit" />
         <param name="mobile_sam_encoder" value="mobile_sam_encoder.jit" />
         <param name="mobile_sam_decoder" value="mobile_sam_decoder.jit" />
-        <param name="superpoint" value="superpoint.onnx" />
+        <param name="superpoint" value="fast_superpoint.onnx" />
         <param name="lightglue" value="superpoint_lightglue.onnx" />
         <param name="ostrack" value="ostracker.onnx" />
         <param name="trt_engine_cache" value="trt_engine_cache/" />
