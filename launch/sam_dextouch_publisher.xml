@@ -1,6 +1,6 @@
 <launch>
-    <node pkg="gum_perception" exec="sam_publisher" name="sam" namespace="gum">
-        <param name="device" value="0" />
+    <node pkg="gum_perception" exec="sam_publisher" name="sam" namespace="gum" output="screen" launch-prefix="xterm -e gdb -ex run --args">
+        <param name="device" value="1" />
         <param name="height" value="480" />
         <param name="width" value="640" />
         <param name="intrinsics"
