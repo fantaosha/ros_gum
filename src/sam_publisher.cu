@@ -31,7 +31,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   this->declare_parameter("pose_wc", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("finger_offset", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("finger_ids", rclcpp::PARAMETER_INTEGER_ARRAY);
-  this->declare_parameter("save_results", rclcpp::PARAMETER_BOOL);
+  this->declare_parameter("save_results", rclcpp::PARAMETER_INTEGER);
   this->declare_parameter("result_path", rclcpp::PARAMETER_STRING);
 
   this->declare_parameter("color_topic", rclcpp::PARAMETER_STRING);
@@ -77,7 +77,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   auto finger_ids = this->get_parameter("finger_ids").as_integer_array();
   m_finger_ids.resize(finger_ids.size());
   std::copy(finger_ids.begin(), finger_ids.end(), m_finger_ids.begin());
-  m_save_results = this->get_parameter("save_results").as_bool();
+  m_save_results = this->get_parameter("save_results").as_int();
   m_result_path = this->get_parameter("result_path").as_string();
 
   const std::string color_topic =
@@ -203,7 +203,7 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
 
   m_ostracker->Initialize(curr_frame.image, curr_frame.bbox.cast<float>());
   ExtractKeyPoints(curr_frame, curr_frame.mask_cpu.data_ptr<uint8_t>());
-  if (m_save_results) {
+  if (m_save_results >= 1) {
     WriteFrame(curr_frame);
   }
   m_frames_v.push_back(std::move(curr_frame));
@@ -314,6 +314,10 @@ void SAMPublisher::Process(const cv::Mat &image, const cv::Mat &depth,
   RCLCPP_INFO_STREAM(this->get_logger(),
                      "Frame " << curr_frame.id
                               << ": Segmentation has been refined.");
+  if (m_save_results >= 2) {
+    WriteMatch(prev_frame, curr_frame, matches_v);
+  }
+
   // Refine Keypoints
   int num_initial_keypoints = curr_frame.keypoints_v.size();
   RefineKeyPoints(curr_frame);
@@ -323,7 +327,7 @@ void SAMPublisher::Process(const cv::Mat &image, const cv::Mat &depth,
                                              << ": Keypoints has been refined ("
                                              << num_keypoints << "/"
                                              << num_initial_keypoints << ").");
-  if (m_save_results) {
+  if (m_save_results >= 1) {
     WriteFrame(curr_frame);
   }
   m_frames_v.push_back(std::move(curr_frame));
@@ -351,7 +355,7 @@ void SAMPublisher::WarmUp() {
                           point_coords_v[0][1] + 0.2f * height};
   std::vector<float> point_labels_v(point_coords_v.size(), 1.0f);
   torch::Tensor masks, scores, logits;
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 2; i++) {
     m_mobile_sam->SetImage(test_image);
     m_mobile_sam->Query(point_coords_v, point_labels_v, bbox, masks, scores,
                         logits);
@@ -360,7 +364,7 @@ void SAMPublisher::WarmUp() {
   }
 
   m_ostracker->Initialize(test_image, bbox);
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 5; i++) {
     Eigen::Vector4f target_bbox;
     m_ostracker->Track(test_image, bbox, target_bbox);
     m_mobile_sam->SetImage(test_image);
@@ -500,12 +504,14 @@ void SAMPublisher::WriteFrame(const Frame &frame) {
 
   cv::Mat masked_image;
   image.copyTo(masked_image, mask);
-  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) + "_masked_color.jpg",
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) +
+                  "_masked_color.jpg",
               masked_image);
 
   cv::Mat masked_depth;
   frame.depth.copyTo(masked_depth, mask);
-  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) + "_masked_depth.png",
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) +
+                  "_masked_depth.png",
               masked_depth);
 
   std::vector<cv::KeyPoint> cv_keypoints_v;
@@ -515,13 +521,55 @@ void SAMPublisher::WriteFrame(const Frame &frame) {
   cv::Mat masked_image_with_keypoints;
   cv::drawKeypoints(masked_image, cv_keypoints_v, masked_image_with_keypoints,
                     cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
-  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) + "_keypoints.jpg",
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) +
+                  "_keypoints.jpg",
               masked_image_with_keypoints);
 
   cv::rectangle(image, cv::Point(frame.bbox[0], frame.bbox[1]),
                 cv::Point(frame.bbox[2], frame.bbox[3]), cv::Scalar(0, 0, 255),
                 1, cv::LINE_8);
-  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) + "_bbox.jpg", image);
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) + "_bbox.jpg",
+              image);
+}
+
+void SAMPublisher::WriteMatch(const Frame &prev_frame, const Frame &curr_frame,
+                              const std::vector<Eigen::Vector2i> &matches_v) {
+  std::vector<cv::KeyPoint> prev_cv_keypoints_v;
+  std::vector<cv::KeyPoint> curr_cv_keypoints_v;
+  std::vector<cv::DMatch> cv_matches_v;
+
+  for (const auto &keypoint : prev_frame.keypoints_v) {
+    prev_cv_keypoints_v.push_back({keypoint[0] - prev_frame.offset[0],
+                                   keypoint[1] - prev_frame.offset[1], 1});
+  }
+
+  for (const auto &keypoint : curr_frame.keypoints_v) {
+    curr_cv_keypoints_v.push_back({keypoint[0] - curr_frame.offset[0],
+                                   keypoint[1] - curr_frame.offset[1], 1});
+  }
+
+  for (const auto &match : matches_v) {
+    assert(match[0] >= 0 && match[0] < (int)prev_cv_keypoints_v.size());
+    assert(match[1] >= 0 && match[1] < (int)curr_cv_keypoints_v.size());
+    cv_matches_v.push_back({match[0], match[1], 1});
+  }
+
+  auto prev_cropped_image =
+      prev_frame.image(cv::Range(prev_frame.bbox[1], prev_frame.bbox[3]),
+                       cv::Range(prev_frame.bbox[0], prev_frame.bbox[2]));
+  auto curr_cropped_image =
+      curr_frame.image(cv::Range(curr_frame.bbox[1], curr_frame.bbox[3]),
+                       cv::Range(curr_frame.bbox[0], curr_frame.bbox[2]));
+
+  cv::Mat cv_match_image;
+  std::vector<char> cv_match_mask_v(cv_matches_v.size(), 1);
+  cv::drawMatches(prev_cropped_image, prev_cv_keypoints_v, curr_cropped_image,
+                  curr_cv_keypoints_v, cv_matches_v, cv_match_image,
+                  cv::Scalar::all(-1), cv::Scalar::all(-1), cv_match_mask_v,
+                  cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
+  cv::imwrite(m_result_path + "image_" + std::to_string(curr_frame.id) +
+                  "_matched.jpg",
+              cv_match_image);
 }
 
 void SAMPublisher::Publish(const Frame &frame,
