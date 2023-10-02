@@ -32,6 +32,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   this->declare_parameter("finger_offset", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("finger_ids", rclcpp::PARAMETER_INTEGER_ARRAY);
   this->declare_parameter("save_results", rclcpp::PARAMETER_BOOL);
+  this->declare_parameter("result_path", rclcpp::PARAMETER_STRING);
 
   this->declare_parameter("color_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("depth_topic", rclcpp::PARAMETER_STRING);
@@ -77,6 +78,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   m_finger_ids.resize(finger_ids.size());
   std::copy(finger_ids.begin(), finger_ids.end(), m_finger_ids.begin());
   m_save_results = this->get_parameter("save_results").as_bool();
+  m_result_path = this->get_parameter("result_path").as_string();
 
   const std::string color_topic =
       this->get_parameter("color_topic").as_string();
@@ -493,16 +495,17 @@ void SAMPublisher::WriteFrame(const Frame &frame) {
   cv::cvtColor(frame.image, image, CV_RGB2BGR);
 
   const cv::Mat mask(image.size(), CV_8U, frame.mask_cpu.data_ptr<uint8_t>());
-  cv::imwrite("image_" + std::to_string(frame.id) + "_mask.png", mask);
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) + "_mask.png",
+              mask);
 
   cv::Mat masked_image;
   image.copyTo(masked_image, mask);
-  cv::imwrite("image_" + std::to_string(frame.id) + "_masked_color.jpg",
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) + "_masked_color.jpg",
               masked_image);
 
   cv::Mat masked_depth;
   frame.depth.copyTo(masked_depth, mask);
-  cv::imwrite("image_" + std::to_string(frame.id) + "_masked_depth.png",
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) + "_masked_depth.png",
               masked_depth);
 
   std::vector<cv::KeyPoint> cv_keypoints_v;
@@ -512,13 +515,13 @@ void SAMPublisher::WriteFrame(const Frame &frame) {
   cv::Mat masked_image_with_keypoints;
   cv::drawKeypoints(masked_image, cv_keypoints_v, masked_image_with_keypoints,
                     cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
-  cv::imwrite("image_" + std::to_string(frame.id) + "_keypoints.jpg",
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) + "_keypoints.jpg",
               masked_image_with_keypoints);
 
   cv::rectangle(image, cv::Point(frame.bbox[0], frame.bbox[1]),
                 cv::Point(frame.bbox[2], frame.bbox[3]), cv::Scalar(0, 0, 255),
                 1, cv::LINE_8);
-  cv::imwrite("image_" + std::to_string(frame.id) + "_bbox.jpg", image);
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) + "_bbox.jpg", image);
 }
 
 void SAMPublisher::Publish(const Frame &frame,
@@ -529,6 +532,7 @@ void SAMPublisher::Publish(const Frame &frame,
   sensor_msgs::msg::Image::SharedPtr msg =
       cv_bridge::CvImage(header, "16UC1", masked_depth).toImageMsg();
   m_segmentation_publisher->publish(*msg);
+  msg->header.frame_id = frame.id;
 }
 
 void SAMPublisher::CallBack(

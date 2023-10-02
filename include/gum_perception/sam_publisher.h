@@ -62,6 +62,7 @@ protected:
   gum::perception::feature::GraphParameters m_graph_params;
   gum::perception::feature::LeidenParameters m_leiden_params;
   float m_outlier_tolerance;
+  std::string m_result_path;
 
   pinocchio::Model m_robot_model;
   Eigen::Matrix<double, 3, 4> m_base_pose;
