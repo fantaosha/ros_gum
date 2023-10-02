@@ -21,9 +21,8 @@
         <param name="finger_offset" value="[-2.1320e-03, 2.1000e-05, 1.7545e-02]" />
         <param name="save_results" value="true" />
         <param name="finger_ids" value="[12, 32, 42, 22]" />
-        <param name="meta_hand_urdf"
-            value="/home/taoshaf/Documents/GUM/data/assets/allegro/allegro_digit_left_ball.urdf" />
-        <param name="model_path" value="/home/taoshaf/Documents/GUM/gum/labs/cpp/models/" />
+        <param name="meta_hand_urdf" value="data/assets/allegro/allegro_digit_left_ball.urdf" />
+        <param name="model_path" value="models/" />
         <param name="joint_state_topic" value="/allegroHand/joint_states" />
         <param name="color_topic" value="/realsense_front/color/image_raw/compressed" />
         <param name="depth_topic" value="/realsense_front/aligned_depth_to_color/image_raw" />
@@ -36,6 +35,6 @@
         <param name="lightglue" value="superpoint_lightglue.onnx" />
         <param name="ostrack" value="ostracker.onnx" />
         <param name="trt_engine_cache" value="trt_engine_cache/" />
-        <param name="test_image" value="/home/taoshaf/ros_ws/data/test_image.jpg" />
+        <param name="test_image" value="data/test_image.jpg" />
     </node>
 </launch>
