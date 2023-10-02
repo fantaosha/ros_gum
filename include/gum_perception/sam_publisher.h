@@ -15,7 +15,7 @@
 #include <gum/perception/feature/frame.cuh>
 #include <gum/perception/feature/light_glue.h>
 #include <gum/perception/feature/outlier_rejection.h>
-#include <gum/perception/feature/super_point.h>
+#include <gum/perception/feature/fast_super_point.h>
 #include <gum/perception/segmentation/segmentation.h>
 
 namespace gum {
@@ -44,7 +44,7 @@ protected:
 
   std::shared_ptr<gum::perception::segmentation::SAM> m_sam;
   std::shared_ptr<gum::perception::segmentation::SAM> m_mobile_sam;
-  std::shared_ptr<gum::perception::feature::SuperPoint> m_superpoint;
+  std::shared_ptr<gum::perception::feature::FastSuperPoint> m_superpoint;
   std::shared_ptr<gum::perception::feature::LightGlue> m_lightglue;
   std::shared_ptr<gum::perception::bbox::OSTrack> m_ostracker;
 

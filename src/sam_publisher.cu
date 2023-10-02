@@ -136,7 +136,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
       sam_encoder_checkpoint, sam_decoder_checkpoint, m_device);
   m_mobile_sam = std::make_shared<gum::perception::segmentation::SAM>(
       mobile_sam_encoder_checkpoint, mobile_sam_decoder_checkpoint, m_device);
-  m_superpoint = std::make_shared<gum::perception::feature::SuperPoint>(
+  m_superpoint = std::make_shared<gum::perception::feature::FastSuperPoint>(
       superpoint_checkpoint, trt_engine_cache_path, m_device);
   m_lightglue = std::make_shared<gum::perception::feature::LightGlue>(
       lightglue_checkpoint, trt_engine_cache_path, m_device);
