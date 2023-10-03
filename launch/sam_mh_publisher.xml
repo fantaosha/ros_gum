@@ -25,7 +25,7 @@
         <param name="meta_hand_urdf" value="data/assets/allegro/allegro_digit_left_ball.urdf" />
         <param name="model_path" value="models/" />
         <param name="joint_state_topic" value="/allegroHand/joint_states" />
-        <param name="color_topic" value="/realsense_front/color/image_raw/compressed" />
+        <param name="color_topic" value="/realsense_front/color/image_raw" />
         <param name="depth_topic" value="/realsense_front/aligned_depth_to_color/image_raw" />
         <param name="segmentation_topic" value="/realsense_front/seg" />
         <param name="sam_encoder" value="sam_vit_l_encoder.jit" />
