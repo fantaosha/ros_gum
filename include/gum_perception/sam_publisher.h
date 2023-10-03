@@ -12,10 +12,10 @@
 #include <gum/graph/types.hpp>
 #include <gum/perception/bbox/bbox.h>
 #include <gum/perception/dataset/dataset.h>
+#include <gum/perception/feature/fast_super_point.h>
 #include <gum/perception/feature/frame.cuh>
 #include <gum/perception/feature/light_glue.h>
 #include <gum/perception/feature/outlier_rejection.h>
-#include <gum/perception/feature/fast_super_point.h>
 #include <gum/perception/segmentation/segmentation.h>
 
 namespace gum {
@@ -33,8 +33,7 @@ protected:
 
   std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::Image>>
       m_segmentation_publisher;
-  std::shared_ptr<
-      message_filters::Subscriber<sensor_msgs::msg::Image>>
+  std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>>
       m_color_subscriber;
   std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>>
       m_depth_subscriber;
@@ -61,6 +60,7 @@ protected:
   gum::perception::feature::GraphParameters m_graph_params;
   gum::perception::feature::LeidenParameters m_leiden_params;
   float m_outlier_tolerance;
+  std::string m_result_path;
 
   pinocchio::Model m_robot_model;
   Eigen::Matrix<double, 3, 4> m_base_pose;
@@ -75,7 +75,7 @@ protected:
   std::vector<Eigen::Vector3f> m_initial_point_clouds_v;
 
   std::vector<Frame> m_frames_v;
-  bool m_save_results;
+  int m_save_results = 0;
 
 private:
   void Initialize(const cv::Mat &image, const cv::Mat &depth,
@@ -84,10 +84,9 @@ private:
                const Eigen::VectorXd &joint_angles);
   void WarmUp();
 
-  void
-  AddFrame(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
-           const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
-           const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
+  void AddFrame(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
+                const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
+                const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
   void ProjectGraspCenter(const std::vector<Eigen::Vector3d> &finger_tips,
                           Eigen::Vector2d &grasp_center);
   void GetFingerTips(const Eigen::VectorXd &joint_angles,
@@ -95,11 +94,12 @@ private:
   void ExtractKeyPoints(Frame &frame, const uint8_t *mask_ptr);
   void RefineKeyPoints(Frame &frame);
   void WriteFrame(const Frame &frame);
+  void WriteMatch(const Frame &prev_frame, const Frame &curr_frame,
+                  const std::vector<Eigen::Vector2i> &matches_v);
   void Publish(const Frame &frame, const std_msgs::msg::Header &header);
-  void
-  CallBack(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
-           const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
-           const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
+  void CallBack(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
+                const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
+                const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
 };
 } // namespace perception
 } // namespace gum
