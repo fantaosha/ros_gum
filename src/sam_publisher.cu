@@ -114,9 +114,9 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
 
   m_segmentation_publisher =
       this->create_publisher<sensor_msgs::msg::Image>(sam_topic, 10);
-  m_color_subscriber = std::make_shared<
-      message_filters::Subscriber<sensor_msgs::msg::Image>>(
-      this, color_topic);
+  m_color_subscriber =
+      std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
+          this, color_topic);
   m_depth_subscriber =
       std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
           this, depth_topic);
@@ -202,7 +202,14 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
   curr_frame.offset = curr_frame.bbox.head<2>().cast<float>();
 
   m_ostracker->Initialize(curr_frame.image, curr_frame.bbox.cast<float>());
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id
+                              << ": Bounding box has been created.");
   ExtractKeyPoints(curr_frame, curr_frame.mask_cpu.data_ptr<uint8_t>());
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id << ": SuperPoint has extracted "
+                              << curr_frame.keypoints_v.size()
+                              << " keypoints.");
   if (m_save_results >= 1) {
     WriteFrame(curr_frame);
   }
