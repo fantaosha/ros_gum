@@ -4,6 +4,7 @@
 #include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/synchronizer.h>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 
@@ -88,6 +89,7 @@ private:
                 const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
                 const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
   void ProjectGraspCenter(const std::vector<Eigen::Vector3d> &finger_tips,
+                          std::vector<Eigen::Vector2d> &finger_tip_centers,
                           Eigen::Vector2d &grasp_center);
   void GetFingerTips(const Eigen::VectorXd &joint_angles,
                      std::vector<Eigen::Vector3d> &finger_tips);

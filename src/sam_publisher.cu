@@ -171,11 +171,27 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
   std::vector<Eigen::Vector3d> finger_tips;
   Eigen::Vector2d pixel_c;
 
+  std::vector<Eigen::Vector2d> fingers_c;
   GetFingerTips(joint_angles, finger_tips);
-  ProjectGraspCenter(finger_tips, pixel_c);
+  ProjectGraspCenter(finger_tips, fingers_c, pixel_c);
   RCLCPP_INFO_STREAM(this->get_logger(),
                      "Frame " << curr_frame.id
                               << ": Grasp center has been computed.");
+  if (m_save_results >= 1) {
+    cv::Mat image;
+    cv::cvtColor(curr_frame.image, image, CV_RGB2BGR);
+    std::vector<cv::KeyPoint> cv_keypoints_v;
+    for (const auto &keypoint : fingers_c) {
+      cv_keypoints_v.push_back({keypoint[0], keypoint[1], 1});
+    }
+    cv_keypoints_v.push_back({pixel_c[0], pixel_c[1], 1});
+    cv::Mat image_with_tips;
+    cv::drawKeypoints(image, cv_keypoints_v, image_with_tips,
+                      cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
+    cv::imwrite(m_result_path + "image_" + std::to_string(curr_frame.id) +
+                    "_tips.jpg",
+                image_with_tips);
+  }
 
   m_sam->SetImage(curr_frame.image);
   std::vector<Eigen::Vector2f> point_coords_v{pixel_c.cast<float>()};
@@ -183,9 +199,9 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
   torch::Tensor masks, scores, logits;
   m_sam->Query(point_coords_v, point_labels_v, torch::nullopt, masks, scores,
                logits);
-  RCLCPP_INFO_STREAM(this->get_logger(),
-                     "Frame " << curr_frame.id
-                              << ": Initial segmentation done.");
+  RCLCPP_INFO_STREAM(this->get_logger(), "Frame "
+                                             << curr_frame.id
+                                             << ": Initial segmentation done.");
 
   float target_area = 0.03 * m_width * m_height;
   masks = masks[0].to(torch::kUInt8);
@@ -424,6 +440,7 @@ void SAMPublisher::AddFrame(
 
 void SAMPublisher::ProjectGraspCenter(
     const std::vector<Eigen::Vector3d> &finger_tips,
+    std::vector<Eigen::Vector2d> &finger_tip_centers,
     Eigen::Vector2d &grasp_center) {
   Eigen::Vector3d point_w = Eigen::Vector3d::Zero();
   for (const auto &finger_tip : finger_tips) {
@@ -435,6 +452,13 @@ void SAMPublisher::ProjectGraspCenter(
 
   Eigen::Vector3d point_c =
       m_pose_wc.leftCols<3>().transpose() * (point_w - m_pose_wc.col(3));
+
+  for (const auto &tip : finger_tips) {
+    Eigen::Vector2d center = tip.head<2>() / tip[2];
+    center[0] = -m_intrinsics[0] * center[0] + m_intrinsics[2];
+    center[1] = m_intrinsics[1] * center[1] + m_intrinsics[3];
+    finger_tip_centers.push_back(std::move(center));
+  }
 
   grasp_center = point_c.head<2>() / point_c[2];
   grasp_center[0] = -m_intrinsics[0] * grasp_center[0] + m_intrinsics[2];
