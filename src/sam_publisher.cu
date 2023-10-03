@@ -173,6 +173,9 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
 
   GetFingerTips(joint_angles, finger_tips);
   ProjectGraspCenter(finger_tips, pixel_c);
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id
+                              << ": Grasp center has been computed.");
 
   m_sam->SetImage(curr_frame.image);
   std::vector<Eigen::Vector2f> point_coords_v{pixel_c.cast<float>()};
@@ -180,6 +183,9 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
   torch::Tensor masks, scores, logits;
   m_sam->Query(point_coords_v, point_labels_v, torch::nullopt, masks, scores,
                logits);
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id
+                              << ": Initial segmentation done.");
 
   float target_area = 0.03 * m_width * m_height;
   masks = masks[0].to(torch::kUInt8);
@@ -362,7 +368,7 @@ void SAMPublisher::WarmUp() {
                           point_coords_v[0][1] + 0.2f * height};
   std::vector<float> point_labels_v(point_coords_v.size(), 1.0f);
   torch::Tensor masks, scores, logits;
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 5; i++) {
     m_mobile_sam->SetImage(test_image);
     m_mobile_sam->Query(point_coords_v, point_labels_v, bbox, masks, scores,
                         logits);
