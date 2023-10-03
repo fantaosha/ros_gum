@@ -30,6 +30,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   this->declare_parameter("base_pose", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("pose_wc", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("finger_offset", rclcpp::PARAMETER_DOUBLE_ARRAY);
+  this->declare_parameter("sam_offset", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("finger_ids", rclcpp::PARAMETER_INTEGER_ARRAY);
   this->declare_parameter("save_results", rclcpp::PARAMETER_INTEGER);
   this->declare_parameter("result_path", rclcpp::PARAMETER_STRING);
@@ -74,6 +75,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
       this->get_parameter("pose_wc").as_double_array().data());
   m_finger_offset = Eigen::Map<const Eigen::Vector3d>(
       this->get_parameter("finger_offset").as_double_array().data());
+  m_sam_offset = this->get_parameter("sam_offset").as_double();
   auto finger_ids = this->get_parameter("finger_ids").as_integer_array();
   m_finger_ids.resize(finger_ids.size());
   std::copy(finger_ids.begin(), finger_ids.end(), m_finger_ids.begin());
@@ -182,9 +184,9 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
     cv::cvtColor(curr_frame.image, image, CV_RGB2BGR);
     std::vector<cv::KeyPoint> cv_keypoints_v;
     for (const auto &keypoint : fingers_c) {
-      cv_keypoints_v.push_back({keypoint[0], keypoint[1], 1});
+      cv_keypoints_v.push_back({(float)keypoint[0], (float)keypoint[1], 1});
     }
-    cv_keypoints_v.push_back({pixel_c[0], pixel_c[1], 1});
+    cv_keypoints_v.push_back({(float)pixel_c[0], (float)pixel_c[1], 1});
     cv::Mat image_with_tips;
     cv::drawKeypoints(image, cv_keypoints_v, image_with_tips,
                       cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
@@ -448,21 +450,23 @@ void SAMPublisher::ProjectGraspCenter(
   }
 
   point_w /= finger_tips.size();
-  point_w[2] += 0.03;
+  point_w[2] += m_sam_offset;
 
   Eigen::Vector3d point_c =
       m_pose_wc.leftCols<3>().transpose() * (point_w - m_pose_wc.col(3));
 
-  for (const auto &tip : finger_tips) {
-    Eigen::Vector2d center = tip.head<2>() / tip[2];
+  grasp_center = point_c.head<2>() / point_c[2];
+  grasp_center[0] = -m_intrinsics[0] * grasp_center[0] + m_intrinsics[2];
+  grasp_center[1] = m_intrinsics[1] * grasp_center[1] + m_intrinsics[3];
+
+  for (const auto &tip_w : finger_tips) {
+    Eigen::Vector3d tip_c =
+        m_pose_wc.leftCols<3>().transpose() * (tip_w - m_pose_wc.col(3));
+    Eigen::Vector2d center = tip_c.head<2>() / tip_c[2];
     center[0] = -m_intrinsics[0] * center[0] + m_intrinsics[2];
     center[1] = m_intrinsics[1] * center[1] + m_intrinsics[3];
     finger_tip_centers.push_back(std::move(center));
   }
-
-  grasp_center = point_c.head<2>() / point_c[2];
-  grasp_center[0] = -m_intrinsics[0] * grasp_center[0] + m_intrinsics[2];
-  grasp_center[1] = m_intrinsics[1] * grasp_center[1] + m_intrinsics[3];
 }
 
 void SAMPublisher::GetFingerTips(const Eigen::VectorXd &joint_angles,

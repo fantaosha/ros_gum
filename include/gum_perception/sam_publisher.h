@@ -68,6 +68,7 @@ protected:
   Eigen::Vector3d m_finger_offset;
   std::vector<int> m_finger_ids;
   Eigen::Matrix<double, 3, 4> m_pose_wc;
+  double m_sam_offset;
 
   std::vector<Eigen::Vector2f> m_initial_keypoints_v;
   std::vector<float> m_initial_keypoint_scores_v;

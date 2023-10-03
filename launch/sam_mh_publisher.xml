@@ -15,10 +15,11 @@
         <param name="leiden_resolution" value="1.15" />
         <param name="outlier_tolerance" value="2e-3" />
         <param name="base_pose"
-            value="[0.0000, 0.0000, 1.0000, -1.0000, 0.0000, 0.0000, 0.0000, -1.0000, 0.0000, 0.0100, 0.0200, 0.5250]" />
+            value="[1.0000, 0.0000, 0.0000, 0.0000, 1.0000, 0.0000, 0.0000, 0.0000, 1.0000, 0.0000, 0.0000, 0.0000]" />
         <param name="pose_wc"
             value="[0.017820410430431366, 0.35532617568969727, -0.9345724582672119, 0.3067612946033478, 0.8876969814300537, 0.34335336089134216, 0.9516196250915527, -0.2928093671798706, -0.09318119287490845, 0.5147740840911865, -0.19989359378814697, -0.04227131977677345]" />
         <param name="finger_offset" value="[-2.1320e-03, 2.1000e-05, 1.7545e-02]" />
+        <param name="sam_offset" value="0.0" />
         <param name="save_results" value="1" />
         <param name="result_path" value="results/" />
         <param name="finger_ids" value="[12, 32, 42, 22]" />
@@ -37,5 +38,3 @@
         <param name="ostrack" value="ostracker.onnx" />
         <param name="trt_engine_cache" value="trt_engine_cache/" />
         <param name="test_image" value="data/test_image.jpg" />
-    </node>
-</launch>
