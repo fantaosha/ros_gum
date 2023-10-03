@@ -620,8 +620,8 @@ void SAMPublisher::Publish(const Frame &frame,
                                            frame.mask_cpu.data_ptr<uint8_t>()));
   sensor_msgs::msg::Image::SharedPtr msg =
       cv_bridge::CvImage(header, "16UC1", masked_depth).toImageMsg();
+  msg->header.frame_id = std::to_string(frame.id);
   m_segmentation_publisher->publish(*msg);
-  msg->header.frame_id = frame.id;
 }
 
 void SAMPublisher::CallBack(
