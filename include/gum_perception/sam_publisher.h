@@ -28,14 +28,13 @@ public:
 
 protected:
   using ApproximatePolicy = message_filters::sync_policies::ApproximateTime<
-      sensor_msgs::msg::CompressedImage, sensor_msgs::msg::Image,
+      sensor_msgs::msg::Image, sensor_msgs::msg::Image,
       sensor_msgs::msg::JointState>;
   using Synchronizer = message_filters::Synchronizer<ApproximatePolicy>;
 
   std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::Image>>
       m_segmentation_publisher;
-  std::shared_ptr<
-      message_filters::Subscriber<sensor_msgs::msg::CompressedImage>>
+  std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>>
       m_color_subscriber;
   std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>>
       m_depth_subscriber;
@@ -69,6 +68,7 @@ protected:
   Eigen::Vector3d m_finger_offset;
   std::vector<int> m_finger_ids;
   Eigen::Matrix<double, 3, 4> m_pose_wc;
+  double m_sam_offset;
 
   std::vector<Eigen::Vector2f> m_initial_keypoints_v;
   std::vector<float> m_initial_keypoint_scores_v;
@@ -86,11 +86,11 @@ private:
                const Eigen::VectorXd &joint_angles);
   void WarmUp();
 
-  void
-  AddFrame(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
-           const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
-           const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
+  void AddFrame(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
+                const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
+                const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
   void ProjectGraspCenter(const std::vector<Eigen::Vector3d> &finger_tips,
+                          std::vector<Eigen::Vector2d> &finger_tip_centers,
                           Eigen::Vector2d &grasp_center);
   void GetFingerTips(const Eigen::VectorXd &joint_angles,
                      std::vector<Eigen::Vector3d> &finger_tips);
@@ -100,10 +100,9 @@ private:
   void WriteMatch(const Frame &prev_frame, const Frame &curr_frame,
                   const std::vector<Eigen::Vector2i> &matches_v);
   void Publish(const Frame &frame, const std_msgs::msg::Header &header);
-  void
-  CallBack(const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
-           const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
-           const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
+  void CallBack(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
+                const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
+                const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
 };
 } // namespace perception
 } // namespace gum

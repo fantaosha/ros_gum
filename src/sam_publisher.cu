@@ -30,6 +30,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   this->declare_parameter("base_pose", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("pose_wc", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("finger_offset", rclcpp::PARAMETER_DOUBLE_ARRAY);
+  this->declare_parameter("sam_offset", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("finger_ids", rclcpp::PARAMETER_INTEGER_ARRAY);
   this->declare_parameter("save_results", rclcpp::PARAMETER_INTEGER);
   this->declare_parameter("result_path", rclcpp::PARAMETER_STRING);
@@ -74,6 +75,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
       this->get_parameter("pose_wc").as_double_array().data());
   m_finger_offset = Eigen::Map<const Eigen::Vector3d>(
       this->get_parameter("finger_offset").as_double_array().data());
+  m_sam_offset = this->get_parameter("sam_offset").as_double();
   auto finger_ids = this->get_parameter("finger_ids").as_integer_array();
   m_finger_ids.resize(finger_ids.size());
   std::copy(finger_ids.begin(), finger_ids.end(), m_finger_ids.begin());
@@ -114,9 +116,9 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
 
   m_segmentation_publisher =
       this->create_publisher<sensor_msgs::msg::Image>(sam_topic, 10);
-  m_color_subscriber = std::make_shared<
-      message_filters::Subscriber<sensor_msgs::msg::CompressedImage>>(
-      this, color_topic);
+  m_color_subscriber =
+      std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
+          this, color_topic);
   m_depth_subscriber =
       std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
           this, depth_topic);
@@ -124,7 +126,7 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
       message_filters::Subscriber<sensor_msgs::msg::JointState>>(
       this, joint_state_topic);
   m_synchronizer =
-      std::make_shared<Synchronizer>(ApproximatePolicy(10), *m_color_subscriber,
+      std::make_shared<Synchronizer>(ApproximatePolicy(20), *m_color_subscriber,
                                      *m_depth_subscriber, *m_joint_subscriber);
   m_synchronizer->registerCallback(
       std::bind(&SAMPublisher::CallBack, this, _1, _2, _3));
@@ -171,8 +173,27 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
   std::vector<Eigen::Vector3d> finger_tips;
   Eigen::Vector2d pixel_c;
 
+  std::vector<Eigen::Vector2d> fingers_c;
   GetFingerTips(joint_angles, finger_tips);
-  ProjectGraspCenter(finger_tips, pixel_c);
+  ProjectGraspCenter(finger_tips, fingers_c, pixel_c);
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id
+                              << ": Grasp center has been computed.");
+  if (m_save_results >= 1) {
+    cv::Mat image;
+    cv::cvtColor(curr_frame.image, image, CV_RGB2BGR);
+    std::vector<cv::KeyPoint> cv_keypoints_v;
+    for (const auto &keypoint : fingers_c) {
+      cv_keypoints_v.push_back({(float)keypoint[0], (float)keypoint[1], 1});
+    }
+    cv_keypoints_v.push_back({(float)pixel_c[0], (float)pixel_c[1], 1});
+    cv::Mat image_with_tips;
+    cv::drawKeypoints(image, cv_keypoints_v, image_with_tips,
+                      cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
+    cv::imwrite(m_result_path + "image_" + std::to_string(curr_frame.id) +
+                    "_tips.jpg",
+                image_with_tips);
+  }
 
   m_sam->SetImage(curr_frame.image);
   std::vector<Eigen::Vector2f> point_coords_v{pixel_c.cast<float>()};
@@ -180,6 +201,9 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
   torch::Tensor masks, scores, logits;
   m_sam->Query(point_coords_v, point_labels_v, torch::nullopt, masks, scores,
                logits);
+  RCLCPP_INFO_STREAM(this->get_logger(), "Frame "
+                                             << curr_frame.id
+                                             << ": Initial segmentation done.");
 
   float target_area = 0.03 * m_width * m_height;
   masks = masks[0].to(torch::kUInt8);
@@ -192,17 +216,40 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
   curr_frame.mask_gpu = masks[sel];
   curr_frame.mask_cpu = masks[sel].to(torch::kCPU);
 
+  if (m_save_results >= 1) {
+    for (int i = 0; i < 3; i++) {
+      const cv::Mat mask(image.size(), CV_8U,
+                         masks[i].to(torch::kCPU).data_ptr<uint8_t>());
+      cv::Mat masked_image;
+      image.copyTo(masked_image, mask);
+      cv::cvtColor(masked_image, masked_image, CV_RGB2BGR);
+      cv::imwrite(m_result_path + "image_" + std::to_string(0) + "_masked_" +
+                      std::to_string(i) + ".jpg",
+                  masked_image);
+    }
+  }
+
   auto orig_mask = masks[sel].to(torch::kInt16);
   gum::perception::utils::GetBox(m_height, m_width,
                                  (uint16_t *)orig_mask.data_ptr<int16_t>(),
                                  curr_frame.bbox, m_handle->GetStream());
   gum::perception::utils::RefineMask(m_height, m_width, curr_frame.bbox,
                                      curr_frame.mask_cpu.data_ptr<uint8_t>());
+  gum::perception::utils::GetBox(m_height, m_width,
+                                 (uint16_t *)orig_mask.data_ptr<int16_t>(),
+                                 curr_frame.bbox, m_handle->GetStream());
   curr_frame.mask_gpu = curr_frame.mask_cpu.to(curr_frame.mask_gpu.device());
   curr_frame.offset = curr_frame.bbox.head<2>().cast<float>();
 
   m_ostracker->Initialize(curr_frame.image, curr_frame.bbox.cast<float>());
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id
+                              << ": Bounding box has been created.");
   ExtractKeyPoints(curr_frame, curr_frame.mask_cpu.data_ptr<uint8_t>());
+  RCLCPP_INFO_STREAM(this->get_logger(),
+                     "Frame " << curr_frame.id << ": SuperPoint has extracted "
+                              << curr_frame.keypoints_v.size()
+                              << " keypoints.");
   if (m_save_results >= 1) {
     WriteFrame(curr_frame);
   }
@@ -388,7 +435,7 @@ void SAMPublisher::WarmUp() {
 }
 
 void SAMPublisher::AddFrame(
-    const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
+    const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
     const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) {
   cv_bridge::CvImagePtr color_ptr, depth_ptr;
@@ -411,6 +458,7 @@ void SAMPublisher::AddFrame(
 
 void SAMPublisher::ProjectGraspCenter(
     const std::vector<Eigen::Vector3d> &finger_tips,
+    std::vector<Eigen::Vector2d> &finger_tip_centers,
     Eigen::Vector2d &grasp_center) {
   Eigen::Vector3d point_w = Eigen::Vector3d::Zero();
   for (const auto &finger_tip : finger_tips) {
@@ -418,7 +466,7 @@ void SAMPublisher::ProjectGraspCenter(
   }
 
   point_w /= finger_tips.size();
-  point_w[2] += 0.03;
+  point_w[2] += m_sam_offset;
 
   Eigen::Vector3d point_c =
       m_pose_wc.leftCols<3>().transpose() * (point_w - m_pose_wc.col(3));
@@ -426,6 +474,15 @@ void SAMPublisher::ProjectGraspCenter(
   grasp_center = point_c.head<2>() / point_c[2];
   grasp_center[0] = -m_intrinsics[0] * grasp_center[0] + m_intrinsics[2];
   grasp_center[1] = m_intrinsics[1] * grasp_center[1] + m_intrinsics[3];
+
+  for (const auto &tip_w : finger_tips) {
+    Eigen::Vector3d tip_c =
+        m_pose_wc.leftCols<3>().transpose() * (tip_w - m_pose_wc.col(3));
+    Eigen::Vector2d center = tip_c.head<2>() / tip_c[2];
+    center[0] = -m_intrinsics[0] * center[0] + m_intrinsics[2];
+    center[1] = m_intrinsics[1] * center[1] + m_intrinsics[3];
+    finger_tip_centers.push_back(std::move(center));
+  }
 }
 
 void SAMPublisher::GetFingerTips(const Eigen::VectorXd &joint_angles,
@@ -579,12 +636,13 @@ void SAMPublisher::Publish(const Frame &frame,
                                            frame.mask_cpu.data_ptr<uint8_t>()));
   sensor_msgs::msg::Image::SharedPtr msg =
       cv_bridge::CvImage(header, "16UC1", masked_depth).toImageMsg();
+  msg->header.frame_id = std::to_string(frame.id);
   m_segmentation_publisher->publish(*msg);
   msg->header.frame_id = frame.id;
 }
 
 void SAMPublisher::CallBack(
-    const sensor_msgs::msg::CompressedImage::ConstSharedPtr &color_msg,
+    const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
     const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) {
   this->AddFrame(color_msg, depth_msg, joint_msg);
