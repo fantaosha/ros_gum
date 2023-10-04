@@ -26,6 +26,8 @@ public:
   using Frame = gum::perception::feature::Frame;
   SAMPublisher(const std::string &node_name);
 
+  void Reset() const;
+
 protected:
   using ApproximatePolicy = message_filters::sync_policies::ApproximateTime<
       sensor_msgs::msg::Image, sensor_msgs::msg::Image,
@@ -48,11 +50,6 @@ protected:
   std::shared_ptr<gum::perception::feature::LightGlue> m_lightglue;
   std::shared_ptr<gum::perception::bbox::OSTrack> m_ostracker;
 
-  std::shared_ptr<gum::perception::dataset::RealSenseDataset<
-      gum::perception::dataset::Device::GPU>>
-      m_realsense;
-  std::vector<Eigen::VectorXd> m_joint_angles_v;
-
   int m_device;
   int m_height, m_width;
   Eigen::Vector<float, 8> m_intrinsics;
@@ -70,39 +67,50 @@ protected:
   Eigen::Matrix<double, 3, 4> m_pose_wc;
   double m_sam_offset;
 
-  std::vector<Eigen::Vector2f> m_initial_keypoints_v;
-  std::vector<float> m_initial_keypoint_scores_v;
-  std::vector<Eigen::Vector<float, 256>> m_initial_descriptors_v;
-  std::vector<Eigen::Vector2f> m_initial_normalized_keypoints_v;
-  std::vector<Eigen::Vector3f> m_initial_point_clouds_v;
+  mutable std::vector<Eigen::Vector2f> m_initial_keypoints_v;
+  mutable std::vector<float> m_initial_keypoint_scores_v;
+  mutable std::vector<Eigen::Vector<float, 256>> m_initial_descriptors_v;
+  mutable std::vector<Eigen::Vector2f> m_initial_normalized_keypoints_v;
+  mutable std::vector<Eigen::Vector3f> m_initial_point_clouds_v;
 
-  std::vector<Frame> m_frames_v;
+  mutable std::shared_ptr<gum::perception::dataset::RealSenseDataset<
+      gum::perception::dataset::Device::GPU>>
+      m_realsense;
+  mutable std::vector<Eigen::VectorXd> m_joint_angles_v;
+  mutable std::vector<Frame> m_frames_v;
+  mutable int m_num_frames = 0;
+
   int m_save_results = 0;
 
 private:
-  void Initialize(const cv::Mat &image, const cv::Mat &depth,
-                  const Eigen::VectorXd &joint_angles);
-  void Process(const cv::Mat &image, const cv::Mat &depth,
-               const Eigen::VectorXd &joint_angles);
-  void WarmUp();
+  void Clear() const;
 
-  void AddFrame(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
-                const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
-                const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
+  void Initialize(const cv::Mat &image, const cv::Mat &depth,
+                  const Eigen::VectorXd &joint_angles, Frame &curr_frame) const;
+  void Iterate(const cv::Mat &image, const cv::Mat &depth,
+               const Eigen::VectorXd &joint_angles, const Frame &prev_frame,
+               Frame &curr_frame) const;
+  void WarmUp() const;
+
+  void
+  AddFrame(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
+           const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
+           const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) const;
   void ProjectGraspCenter(const std::vector<Eigen::Vector3d> &finger_tips,
                           std::vector<Eigen::Vector2d> &finger_tip_centers,
-                          Eigen::Vector2d &grasp_center);
+                          Eigen::Vector2d &grasp_center) const;
   void GetFingerTips(const Eigen::VectorXd &joint_angles,
-                     std::vector<Eigen::Vector3d> &finger_tips);
-  void ExtractKeyPoints(Frame &frame, const uint8_t *mask_ptr);
-  void RefineKeyPoints(Frame &frame);
-  void WriteFrame(const Frame &frame);
+                     std::vector<Eigen::Vector3d> &finger_tips) const;
+  void ExtractKeyPoints(Frame &frame, const uint8_t *mask_ptr) const;
+  void RefineKeyPoints(Frame &frame) const;
+  void WriteFrame(const Frame &frame) const;
   void WriteMatch(const Frame &prev_frame, const Frame &curr_frame,
-                  const std::vector<Eigen::Vector2i> &matches_v);
-  void Publish(const Frame &frame, const std_msgs::msg::Header &header);
-  void CallBack(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
-                const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
-                const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg);
+                  const std::vector<Eigen::Vector2i> &matches_v) const;
+  void Publish(const Frame &frame, const std_msgs::msg::Header &header) const;
+  void
+  CallBack(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
+           const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
+           const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) const;
 };
 } // namespace perception
 } // namespace gum

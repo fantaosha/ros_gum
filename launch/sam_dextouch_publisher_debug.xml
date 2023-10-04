@@ -1,9 +1,11 @@
 <launch>
-    <node pkg="gum_perception" exec="sam_publisher" name="sam" namespace="gum" output="screen" launch-prefix="xterm -e gdb -ex run --args">
+    <node pkg="gum_perception" exec="sam_publisher" name="sam" namespace="gum" output="screen"
+        launch-prefix="screen -d -m gdb -ex run --args">
         <param name="device" value="1" />
         <param name="height" value="480" />
         <param name="width" value="640" />
-        <param name="intrinsics" value="[615.0073931049496, 614.3857762049058, 326.1533471461406, 234.2844635618677, 0.1272466505998945, -0.2810470538567604, -0.0013263207505766492, 0.0006093121906229885]" />
+        <param name="intrinsics"
+            value="[615.0073931049496, 614.3857762049058, 326.1533471461406, 234.2844635618677, 0.1272466505998945, -0.2810470538567604, -0.0013263207505766492, 0.0006093121906229885]" />
         <param name="depth_scale" value="0.000607" />
         <param name="min_depth" value="0.15" />
         <param name="max_depth" value="0.85" />
@@ -13,8 +15,10 @@
         <param name="leiden_beta" value="1e-3" />
         <param name="leiden_resolution" value="1.15" />
         <param name="outlier_tolerance" value="2e-3" />
-        <param name="base_pose" value="[0.0000, 0.0000, 1.0000, -1.0000, 0.0000, 0.0000, 0.0000, -1.0000, 0.0000, 0.0100, 0.0200, 0.5250]" />
-        <param name="pose_wc" value="[0.6098, -0.7911,  0.0490, 0.6017,  0.5023,  0.6210, -0.5159, -0.3492,  0.7823, -0.1882, -0.0653,  0.9059]" />
+        <param name="base_pose"
+            value="[0.0000, 0.0000, 1.0000, -1.0000, 0.0000, 0.0000, 0.0000, -1.0000, 0.0000, 0.0100, 0.0200, 0.5250]" />
+        <param name="pose_wc"
+            value="[0.6098, -0.7911,  0.0490, 0.6017,  0.5023,  0.6210, -0.5159, -0.3492,  0.7823, -0.1882, -0.0653,  0.9059]" />
         <param name="finger_offset" value="[-2.1320e-03, 2.1000e-05, 1.7545e-02]" />
         <param name="sam_offset" value="0.03" />
         <param name="save_results" value="0" />

@@ -161,12 +161,26 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   RCLCPP_INFO_STREAM(this->get_logger(), "GUM frontend has been setup.");
   RCLCPP_INFO_STREAM(this->get_logger(),
                      "-------------------------------------------------");
+
+  m_num_frames = 0;
+}
+
+void SAMPublisher::Reset() const {
+  m_realsense->Clear();
+  m_frames_v.clear();
+  m_joint_angles_v.clear();
+  m_num_frames = 0;
+}
+
+void SAMPublisher::Clear() const {
+  this->Reset();
+  m_num_frames = 0;
 }
 
 void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
-                              const Eigen::VectorXd &joint_angles) {
-  Frame curr_frame;
-  curr_frame.id = 0;
+                              const Eigen::VectorXd &joint_angles,
+                              Frame &curr_frame) const {
+  curr_frame.id = m_num_frames;
   curr_frame.image = image;
   curr_frame.depth = depth;
 
@@ -253,14 +267,12 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
   if (m_save_results >= 1) {
     WriteFrame(curr_frame);
   }
-  m_frames_v.push_back(std::move(curr_frame));
 }
 
-void SAMPublisher::Process(const cv::Mat &image, const cv::Mat &depth,
-                           const Eigen::VectorXd &joint_angles) {
-  const auto &prev_frame = m_frames_v.back();
-  Frame curr_frame;
-  curr_frame.id = prev_frame.id + 1;
+void SAMPublisher::Iterate(const cv::Mat &image, const cv::Mat &depth,
+                           const Eigen::VectorXd &joint_angles,
+                           const Frame &prev_frame, Frame &curr_frame) const {
+  curr_frame.id = m_num_frames;
   curr_frame.image = image;
   curr_frame.depth = depth;
 
@@ -377,10 +389,9 @@ void SAMPublisher::Process(const cv::Mat &image, const cv::Mat &depth,
   if (m_save_results >= 1) {
     WriteFrame(curr_frame);
   }
-  m_frames_v.push_back(std::move(curr_frame));
 }
 
-void SAMPublisher::WarmUp() {
+void SAMPublisher::WarmUp() const {
   RCLCPP_INFO_STREAM(this->get_logger(),
                      "-------------------------------------------------");
   RCLCPP_INFO_STREAM(this->get_logger(), "GUM frontend starts to warm up");
@@ -437,7 +448,7 @@ void SAMPublisher::WarmUp() {
 void SAMPublisher::AddFrame(
     const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
-    const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) {
+    const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) const {
   cv_bridge::CvImagePtr color_ptr, depth_ptr;
   color_ptr =
       cv_bridge::toCvCopy(color_msg, sensor_msgs::image_encodings::BGR8);
@@ -459,7 +470,7 @@ void SAMPublisher::AddFrame(
 void SAMPublisher::ProjectGraspCenter(
     const std::vector<Eigen::Vector3d> &finger_tips,
     std::vector<Eigen::Vector2d> &finger_tip_centers,
-    Eigen::Vector2d &grasp_center) {
+    Eigen::Vector2d &grasp_center) const {
   Eigen::Vector3d point_w = Eigen::Vector3d::Zero();
   for (const auto &finger_tip : finger_tips) {
     point_w += finger_tip;
@@ -485,14 +496,15 @@ void SAMPublisher::ProjectGraspCenter(
   }
 }
 
-void SAMPublisher::GetFingerTips(const Eigen::VectorXd &joint_angles,
-                                 std::vector<Eigen::Vector3d> &finger_tips) {
+void SAMPublisher::GetFingerTips(
+    const Eigen::VectorXd &joint_angles,
+    std::vector<Eigen::Vector3d> &finger_tips) const {
   gum::utils::GetFingerTips(m_robot_model, joint_angles, m_base_pose,
                             m_finger_offset, m_finger_ids, finger_tips);
 }
 
 void SAMPublisher::ExtractKeyPoints(Frame &curr_frame,
-                                    const uint8_t *mask_ptr) {
+                                    const uint8_t *mask_ptr) const {
   // Feature Extraction
   cv::Mat cropped_image;
   const cv::Mat mask(curr_frame.image.size(), CV_8U, (void *)mask_ptr);
@@ -522,7 +534,7 @@ void SAMPublisher::ExtractKeyPoints(Frame &curr_frame,
       curr_frame.keypoints_v, curr_frame.point_clouds_v);
 }
 
-void SAMPublisher::RefineKeyPoints(Frame &curr_frame) {
+void SAMPublisher::RefineKeyPoints(Frame &curr_frame) const {
   auto is_valid = curr_frame.mask_cpu.data_ptr<uint8_t>();
   int num_keypoints = curr_frame.keypoints_v.size();
   m_initial_keypoints_v.clear();
@@ -551,7 +563,7 @@ void SAMPublisher::RefineKeyPoints(Frame &curr_frame) {
       curr_frame.keypoints_v, curr_frame.point_clouds_v);
 }
 
-void SAMPublisher::WriteFrame(const Frame &frame) {
+void SAMPublisher::WriteFrame(const Frame &frame) const {
   cv::Mat image;
   cv::cvtColor(frame.image, image, CV_RGB2BGR);
 
@@ -589,8 +601,9 @@ void SAMPublisher::WriteFrame(const Frame &frame) {
               image);
 }
 
-void SAMPublisher::WriteMatch(const Frame &prev_frame, const Frame &curr_frame,
-                              const std::vector<Eigen::Vector2i> &matches_v) {
+void SAMPublisher::WriteMatch(
+    const Frame &prev_frame, const Frame &curr_frame,
+    const std::vector<Eigen::Vector2i> &matches_v) const {
   std::vector<cv::KeyPoint> prev_cv_keypoints_v;
   std::vector<cv::KeyPoint> curr_cv_keypoints_v;
   std::vector<cv::DMatch> cv_matches_v;
@@ -630,7 +643,7 @@ void SAMPublisher::WriteMatch(const Frame &prev_frame, const Frame &curr_frame,
 }
 
 void SAMPublisher::Publish(const Frame &frame,
-                           const std_msgs::msg::Header &header) {
+                           const std_msgs::msg::Header &header) const {
   cv::Mat masked_depth;
   frame.depth.copyTo(masked_depth, cv::Mat(frame.depth.size(), CV_8U,
                                            frame.mask_cpu.data_ptr<uint8_t>()));
@@ -644,7 +657,7 @@ void SAMPublisher::Publish(const Frame &frame,
 void SAMPublisher::CallBack(
     const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
-    const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) {
+    const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) const {
   this->AddFrame(color_msg, depth_msg, joint_msg);
   RCLCPP_INFO_STREAM(
       this->get_logger(),
@@ -653,15 +666,23 @@ void SAMPublisher::CallBack(
   RCLCPP_INFO_STREAM(
       this->get_logger(),
       "---------------------------------------------------------");
-  if (m_frames_v.size() == 0) {
+
+  Frame curr_frame;
+  if (m_num_frames == 0) {
     Initialize(m_realsense->GetFrames().back().image,
-               m_realsense->GetFrames().back().depth, m_joint_angles_v.back());
+               m_realsense->GetFrames().back().depth, m_joint_angles_v.back(),
+               curr_frame);
   } else {
-    Process(m_realsense->GetFrames().back().image,
-            m_realsense->GetFrames().back().depth, m_joint_angles_v.back());
+    const auto &prev_frame = m_frames_v.back();
+    Iterate(m_realsense->GetFrames().back().image,
+            m_realsense->GetFrames().back().depth, m_joint_angles_v.back(),
+            prev_frame, curr_frame);
   }
 
   Publish(m_frames_v.back(), depth_msg->header);
+
+  m_frames_v.push_back(std::move(curr_frame));
+  m_num_frames++;
 }
 } // namespace perception
 } // namespace gum
