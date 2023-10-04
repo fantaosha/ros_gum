@@ -216,12 +216,28 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
   curr_frame.mask_gpu = masks[sel];
   curr_frame.mask_cpu = masks[sel].to(torch::kCPU);
 
+  if (m_save_results >= 1) {
+    for (int i = 0; i < 3; i++) {
+      const cv::Mat mask(image.size(), CV_8U,
+                         masks[i].to(torch::kCPU).data_ptr<uint8_t>());
+      cv::Mat masked_image;
+      image.copyTo(masked_image, mask);
+      cv::cvtColor(masked_image, masked_image, CV_RGB2BGR);
+      cv::imwrite(m_result_path + "image_" + std::to_string(0) + "_masked_" +
+                      std::to_string(i) + ".jpg",
+                  masked_image);
+    }
+  }
+
   auto orig_mask = masks[sel].to(torch::kInt16);
   gum::perception::utils::GetBox(m_height, m_width,
                                  (uint16_t *)orig_mask.data_ptr<int16_t>(),
                                  curr_frame.bbox, m_handle->GetStream());
   gum::perception::utils::RefineMask(m_height, m_width, curr_frame.bbox,
                                      curr_frame.mask_cpu.data_ptr<uint8_t>());
+  gum::perception::utils::GetBox(m_height, m_width,
+                                 (uint16_t *)orig_mask.data_ptr<int16_t>(),
+                                 curr_frame.bbox, m_handle->GetStream());
   curr_frame.mask_gpu = curr_frame.mask_cpu.to(curr_frame.mask_gpu.device());
   curr_frame.offset = curr_frame.bbox.head<2>().cast<float>();
 
