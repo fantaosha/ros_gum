@@ -263,10 +263,12 @@ void SAMPublisher<ColorMsg, DepthMsg>::Initialize(
                                  curr_frame->bbox, m_handle->GetStream());
   gum::perception::utils::RefineMask(m_height, m_width, curr_frame->bbox,
                                      curr_frame->mask_cpu.data_ptr<uint8_t>());
-  gum::perception::utils::GetBox(m_height, m_width,
-                                 (uint16_t *)orig_mask.data_ptr<int16_t>(),
-                                 curr_frame->bbox, m_handle->GetStream());
   curr_frame->mask_gpu = curr_frame->mask_cpu.to(curr_frame->mask_gpu.device());
+
+  auto refined_mask = curr_frame->mask_gpu.to(torch::kInt16);
+  gum::perception::utils::GetBox(m_height, m_width,
+                                 (uint16_t *)refined_mask.data_ptr<int16_t>(),
+                                 curr_frame->bbox, m_handle->GetStream());
   curr_frame->offset = curr_frame->bbox.head<2>().cast<float>();
 
   m_ostracker->Initialize(curr_frame->image, curr_frame->bbox.cast<float>());

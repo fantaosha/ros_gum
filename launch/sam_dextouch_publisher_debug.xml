@@ -42,8 +42,4 @@
         <param name="trt_engine_cache" value="trt_engine_cache/" />
         <param name="test_image" value="data/test_image.jpg" />
     </node>
-    <node pkg="gum_perception" exec="sam_commander" name="sam_cmd" namespace="gum" output="screen"
-        launch-prefix="screen -d -m">
-        <param name="command_topic" value="sam_cmd" />
-    </node>
 </launch>
