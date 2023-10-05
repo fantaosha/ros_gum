@@ -1,5 +1,7 @@
 <launch>
-    <node pkg="gum_perception" exec="sam_publisher" name="sam" namespace="gum" output="screen" launch-prefix="screen -d -m gdb -ex run --args">
+    <node pkg="gum_perception" exec="sam_publisher" name="sam" namespace="gum" output="screen"
+        launch-prefix="screen -d -m gdb -ex run --args">
+        <param name="command_topic" value="sam_cmd" />
         <param name="device" value="0" />
         <param name="height" value="480" />
         <param name="width" value="640" />
@@ -38,5 +40,9 @@
         <param name="ostrack" value="ostracker.onnx" />
         <param name="trt_engine_cache" value="trt_engine_cache/" />
         <param name="test_image" value="data/test_image.jpg" />
+    </node>
+    <node pkg="gum_perception" exec="sam_commander" name="sam_cmd" namespace="gum" output="screen"
+        launch-prefix="screen -d -m">
+        <param name="command_topic" value="sam_cmd" />
     </node>
 </launch>

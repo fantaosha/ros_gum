@@ -7,6 +7,7 @@
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <std_msgs/msg/char.hpp>
 
 #include <pinocchio/algorithm/frames.hpp>
 
@@ -45,6 +46,7 @@ protected:
   std::shared_ptr<message_filters::Subscriber<DepthMsg>> m_depth_subscriber;
   std::shared_ptr<message_filters::Subscriber<JointMsg>> m_joint_subscriber;
   std::shared_ptr<Synchronizer> m_synchronizer;
+  std::shared_ptr<rclcpp::Subscription<std_msgs::msg::Char>> m_cmd_subscriber;
 
   std::shared_ptr<gum::perception::segmentation::SAM> m_sam;
   std::shared_ptr<gum::perception::segmentation::SAM> m_mobile_sam;
@@ -82,6 +84,9 @@ protected:
   mutable std::vector<FramePtr> m_frames_v;
   mutable int m_num_frames = 0;
 
+  mutable bool m_started = false;
+  mutable bool m_active = false;
+
   int m_save_results = 0;
 
 private:
@@ -109,9 +114,10 @@ private:
   void WriteMatch(FrameConstPtr prev_frame, FrameConstPtr curr_frame,
                   const std::vector<Eigen::Vector2i> &matches_v) const;
   void Publish(FrameConstPtr frame, const std_msgs::msg::Header &header) const;
-  void CallBack(typename ColorMsg::ConstSharedPtr color_msg,
-                typename DepthMsg::ConstSharedPtr depth_msg,
-                typename JointMsg::ConstSharedPtr joint_msg) const;
+  void SensorCallBack(typename ColorMsg::ConstSharedPtr color_msg,
+                      typename DepthMsg::ConstSharedPtr depth_msg,
+                      typename JointMsg::ConstSharedPtr joint_msg) const;
+  void CommandCallBack(std_msgs::msg::Char cmd_msg) const;
 };
 } // namespace perception
 } // namespace gum

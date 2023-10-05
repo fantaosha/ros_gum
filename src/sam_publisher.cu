@@ -9,6 +9,11 @@
 #include <opencv2/imgproc.hpp>
 #include <pinocchio/parsers/urdf.hpp>
 
+#define STOP 'w'
+#define START 's'
+#define PAUSE 'a'
+#define RESUME 'd'
+
 namespace gum {
 namespace perception {
 template <typename ColorMsg, typename DepthMsg>
@@ -39,6 +44,7 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
   this->declare_parameter("color_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("depth_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("joint_state_topic", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("command_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("segmentation_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("meta_hand_urdf", rclcpp::PARAMETER_STRING);
   this->declare_parameter("model_path", rclcpp::PARAMETER_STRING);
@@ -89,6 +95,8 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
       this->get_parameter("depth_topic").as_string();
   const std::string joint_state_topic =
       this->get_parameter("joint_state_topic").as_string();
+  const std::string cmd_topic =
+      this->get_parameter("command_topic").as_string();
   const std::string sam_topic =
       this->get_parameter("segmentation_topic").as_string();
   const std::string meta_hand_urdf =
@@ -126,7 +134,10 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
       std::make_shared<Synchronizer>(ApproximatePolicy(20), *m_color_subscriber,
                                      *m_depth_subscriber, *m_joint_subscriber);
   m_synchronizer->registerCallback(
-      std::bind(&SAMPublisher::CallBack, this, _1, _2, _3));
+      std::bind(&SAMPublisher::SensorCallBack, this, _1, _2, _3));
+
+  m_cmd_subscriber = this->create_subscription<std_msgs::msg::Char>(
+      cmd_topic, 10, std::bind(&SAMPublisher::CommandCallBack, this, _1));
 
   igraph_rng_seed(igraph_rng_default(), 0);
 
@@ -156,10 +167,13 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
   WarmUp();
   RCLCPP_INFO_STREAM(this->get_logger(),
                      "-------------------------------------------------");
-  RCLCPP_INFO_STREAM(this->get_logger(), "GUM frontend has been setup.");
+  RCLCPP_INFO_STREAM(this->get_logger(), "GUM frontend has been setup. Press '"
+                                             << START << "' to start.");
   RCLCPP_INFO_STREAM(this->get_logger(),
                      "-------------------------------------------------");
 
+  m_started = false;
+  m_active = false;
   m_num_frames = 0;
 }
 
@@ -677,22 +691,71 @@ void SAMPublisher<ColorMsg, DepthMsg>::Publish(
 }
 
 template <typename ColorMsg, typename DepthMsg>
-void SAMPublisher<ColorMsg, DepthMsg>::CallBack(
+void SAMPublisher<ColorMsg, DepthMsg>::SensorCallBack(
     typename ColorMsg::ConstSharedPtr color_msg,
     typename DepthMsg::ConstSharedPtr depth_msg,
     typename JointMsg::ConstSharedPtr joint_msg) const {
-  RCLCPP_INFO_STREAM(
-      this->get_logger(),
-      "=========================================================");
-  RCLCPP_INFO_STREAM(this->get_logger(), "Frame " << m_frames_v.size());
-  RCLCPP_INFO_STREAM(
-      this->get_logger(),
-      "---------------------------------------------------------");
+  if (m_active && m_started) {
+    RCLCPP_INFO_STREAM(
+        this->get_logger(),
+        "=========================================================");
+    RCLCPP_INFO_STREAM(this->get_logger(), "Frame " << m_frames_v.size());
+    RCLCPP_INFO_STREAM(
+        this->get_logger(),
+        "---------------------------------------------------------");
 
-  AddFrame(color_msg, depth_msg, joint_msg);
+    AddFrame(color_msg, depth_msg, joint_msg);
 
-  auto curr_frame = m_frames_v.back();
-  Publish(curr_frame, depth_msg->header);
+    auto curr_frame = m_frames_v.back();
+    Publish(curr_frame, depth_msg->header);
+  }
+}
+
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::CommandCallBack(
+    std_msgs::msg::Char cmd_msg) const {
+  auto cmd = cmd_msg.data;
+  switch (cmd) {
+  case STOP:
+    if (m_started) {
+      m_started = false;
+      m_active = false;
+      this->Clear();
+      RCLCPP_INFO_STREAM(
+          this->get_logger(),
+          "=========================================================");
+      RCLCPP_INFO_STREAM(this->get_logger(), "GUM Frontend has been stopped.");
+    }
+    break;
+  case START:
+    if (m_started == false) {
+      m_started = true;
+      m_active = true;
+      RCLCPP_INFO_STREAM(
+          this->get_logger(),
+          "=========================================================");
+      RCLCPP_INFO_STREAM(this->get_logger(), "GUM Frontend has been started.");
+    }
+    break;
+  case PAUSE:
+    if (m_started == true && m_active == true) {
+      m_active = false;
+      RCLCPP_INFO_STREAM(
+          this->get_logger(),
+          "=========================================================");
+      RCLCPP_INFO_STREAM(this->get_logger(), "GUM Frontend has been paused.");
+    }
+    break;
+  case RESUME:
+    if (m_started == true && m_active == false) {
+      m_active = true;
+      RCLCPP_INFO_STREAM(
+          this->get_logger(),
+          "=========================================================");
+      RCLCPP_INFO_STREAM(this->get_logger(), "GUM Frontend has been resumed.");
+    }
+    break;
+  }
 }
 
 template class SAMPublisher<sensor_msgs::msg::CompressedImage,

@@ -39,12 +39,12 @@ find_package(Torch REQUIRED)
 
 add_executable(sam_metahand_publisher include/gum_perception/sam_publisher.h src/sam_publisher.cu src/sam_metahand_node.cpp)
 target_link_libraries(sam_metahand_publisher gum ${TORCH_LIBRARIES})
-ament_target_dependencies(sam_metahand_publisher rclcpp message_filters sensor_msgs cv_bridge)
+ament_target_dependencies(sam_metahand_publisher rclcpp std_msgs message_filters sensor_msgs cv_bridge)
 install(TARGETS sam_metahand_publisher DESTINATION lib/${PROJECT_NAME})
 
 add_executable(sam_dextouch_publisher include/gum_perception/sam_publisher.h src/sam_publisher.cu src/sam_dextouch_node.cpp)
 target_link_libraries(sam_dextouch_publisher gum ${TORCH_LIBRARIES})
-ament_target_dependencies(sam_dextouch_publisher rclcpp message_filters sensor_msgs cv_bridge)
+ament_target_dependencies(sam_dextouch_publisher rclcpp std_msgs message_filters sensor_msgs cv_bridge)
 install(TARGETS sam_dextouch_publisher DESTINATION lib/${PROJECT_NAME})
 
 add_executable(sam_commander src/sam_cmd_node.cpp)
