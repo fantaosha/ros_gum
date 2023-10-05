@@ -9,7 +9,8 @@
 int main(int argc, char *argv[]) {
   rclcpp::init(argc, argv);
 
-  rclcpp::spin(std::make_shared<gum::perception::SAMPublisher>("sam"));
+  rclcpp::spin(std::make_shared<gum::perception::SAMPublisher<
+                   sensor_msgs::msg::Image, sensor_msgs::msg::Image>>("sam"));
 
   rclcpp::shutdown();
   return 0;

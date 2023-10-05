@@ -11,7 +11,8 @@
 
 namespace gum {
 namespace perception {
-SAMPublisher::SAMPublisher(const std::string &node_name)
+template <typename ColorMsg, typename DepthMsg>
+SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
     : rclcpp::Node(node_name) {
   // Declare Parameters
   this->declare_parameter("device", rclcpp::PARAMETER_INTEGER);
@@ -114,16 +115,12 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   using std::placeholders::_2;
   using std::placeholders::_3;
 
-  m_segmentation_publisher =
-      this->create_publisher<sensor_msgs::msg::Image>(sam_topic, 10);
-  m_color_subscriber =
-      std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
-          this, color_topic);
-  m_depth_subscriber =
-      std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
-          this, depth_topic);
-  m_joint_subscriber = std::make_shared<
-      message_filters::Subscriber<sensor_msgs::msg::JointState>>(
+  m_seg_depth_publisher = this->create_publisher<ImageMsg>(sam_topic, 10);
+  m_color_subscriber = std::make_shared<message_filters::Subscriber<ColorMsg>>(
+      this, color_topic);
+  m_depth_subscriber = std::make_shared<message_filters::Subscriber<DepthMsg>>(
+      this, depth_topic);
+  m_joint_subscriber = std::make_shared<message_filters::Subscriber<JointMsg>>(
       this, joint_state_topic);
   m_synchronizer =
       std::make_shared<Synchronizer>(ApproximatePolicy(20), *m_color_subscriber,
@@ -166,20 +163,23 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   m_num_frames = 0;
 }
 
-void SAMPublisher::Reset() const {
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::Reset() const {
   m_frames_v.clear();
   m_joint_angles_v.clear();
   m_num_frames = 0;
 }
 
-void SAMPublisher::Clear() const {
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::Clear() const {
   this->Reset();
   m_num_frames = 0;
 }
 
-void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
-                              const Eigen::VectorXd &joint_angles,
-                              FramePtr curr_frame) const {
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::Initialize(
+    const cv::Mat &image, const cv::Mat &depth,
+    const Eigen::VectorXd &joint_angles, FramePtr curr_frame) const {
   curr_frame->id = m_num_frames;
   curr_frame->image = image;
   curr_frame->depth = depth;
@@ -259,20 +259,21 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
   RCLCPP_INFO_STREAM(this->get_logger(),
                      "Frame " << curr_frame->id
                               << ": Bounding box has been created.");
-  ExtractKeyPoints(*curr_frame, curr_frame->mask_cpu.data_ptr<uint8_t>());
+  ExtractKeyPoints(curr_frame, curr_frame->mask_cpu.data_ptr<uint8_t>());
   RCLCPP_INFO_STREAM(this->get_logger(),
                      "Frame " << curr_frame->id << ": SuperPoint has extracted "
                               << curr_frame->keypoints_v.size()
                               << " keypoints.");
   if (m_save_results >= 1) {
-    WriteFrame(*curr_frame);
+    WriteFrame(curr_frame);
   }
 }
 
-void SAMPublisher::Iterate(const cv::Mat &image, const cv::Mat &depth,
-                           const Eigen::VectorXd &joint_angles,
-                           FrameConstPtr prev_frame,
-                           FramePtr curr_frame) const {
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::Iterate(
+    const cv::Mat &image, const cv::Mat &depth,
+    const Eigen::VectorXd &joint_angles, FrameConstPtr prev_frame,
+    FramePtr curr_frame) const {
   curr_frame->id = m_num_frames;
   curr_frame->image = image;
   curr_frame->depth = depth;
@@ -294,7 +295,7 @@ void SAMPublisher::Iterate(const cv::Mat &image, const cv::Mat &depth,
                                       extended_mask_cpu.data_ptr<uint8_t>(),
                                       extended_radius);
 
-  ExtractKeyPoints(*curr_frame, extended_mask_cpu.data_ptr<uint8_t>());
+  ExtractKeyPoints(curr_frame, extended_mask_cpu.data_ptr<uint8_t>());
   RCLCPP_INFO_STREAM(this->get_logger(),
                      "Frame " << curr_frame->id << ": SuperPoint has extracted "
                               << curr_frame->keypoints_v.size()
@@ -369,12 +370,12 @@ void SAMPublisher::Iterate(const cv::Mat &image, const cv::Mat &depth,
                      "Frame " << curr_frame->id
                               << ": Segmentation has been refined.");
   if (m_save_results >= 2) {
-    WriteMatch(*prev_frame, *curr_frame, matches_v);
+    WriteMatch(prev_frame, curr_frame, matches_v);
   }
 
   // Refine Keypoints
   int num_initial_keypoints = curr_frame->keypoints_v.size();
-  RefineKeyPoints(*curr_frame);
+  RefineKeyPoints(curr_frame);
   int num_keypoints = curr_frame->keypoints_v.size();
   RCLCPP_INFO_STREAM(this->get_logger(), "Frame "
                                              << curr_frame->id
@@ -382,11 +383,12 @@ void SAMPublisher::Iterate(const cv::Mat &image, const cv::Mat &depth,
                                              << num_keypoints << "/"
                                              << num_initial_keypoints << ").");
   if (m_save_results >= 1) {
-    WriteFrame(*curr_frame);
+    WriteFrame(curr_frame);
   }
 }
 
-void SAMPublisher::WarmUp() const {
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::WarmUp() const {
   RCLCPP_INFO_STREAM(this->get_logger(),
                      "-------------------------------------------------");
   RCLCPP_INFO_STREAM(this->get_logger(), "GUM frontend starts to warm up");
@@ -440,10 +442,11 @@ void SAMPublisher::WarmUp() const {
   }
 }
 
-void SAMPublisher::AddFrame(
-    const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
-    const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
-    const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) const {
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::AddFrame(
+    typename ColorMsg::ConstSharedPtr color_msg,
+    typename DepthMsg::ConstSharedPtr depth_msg,
+    typename JointMsg::ConstSharedPtr joint_msg) const {
   cv_bridge::CvImagePtr color_ptr, depth_ptr;
   color_ptr =
       cv_bridge::toCvCopy(color_msg, sensor_msgs::image_encodings::BGR8);
@@ -452,21 +455,23 @@ void SAMPublisher::AddFrame(
   // Rectify the color and depth
   cv::Mat image, depth;
   m_realsense_camera->Rectify(color_ptr->image, depth_ptr->image, image, depth);
-  Eigen::Map<const Eigen::VectorXd> raw_joint_angles(
-      joint_msg->position.data(), joint_msg->position.size());
+  cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
 
   // Save joint angles
+  Eigen::Map<const Eigen::VectorXd> raw_joint_angles(
+      joint_msg->position.data(), joint_msg->position.size());
   Eigen::VectorXd joint_angles(m_robot_model.nq);
   joint_angles.segment<4>(0) = raw_joint_angles.segment<4>(0);
   joint_angles.segment<4>(4) = raw_joint_angles.segment<4>(12);
   joint_angles.segment<8>(8) = raw_joint_angles.segment<8>(4);
   m_joint_angles_v.push_back(std::move(joint_angles));
 
+  // Add frame
   FramePtr curr_frame = std::make_shared<Frame>();
   if (m_num_frames == 0) {
     Initialize(image, depth, m_joint_angles_v.back(), curr_frame);
   } else {
-    const auto &prev_frame = m_frames_v.back();
+    const auto prev_frame = m_frames_v.back();
     Iterate(image, depth, m_joint_angles_v.back(), prev_frame, curr_frame);
   }
 
@@ -474,7 +479,8 @@ void SAMPublisher::AddFrame(
   m_num_frames++;
 }
 
-void SAMPublisher::ProjectGraspCenter(
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::ProjectGraspCenter(
     const std::vector<Eigen::Vector3d> &finger_tips,
     std::vector<Eigen::Vector2d> &finger_tip_centers,
     Eigen::Vector2d &grasp_center) const {
@@ -503,126 +509,133 @@ void SAMPublisher::ProjectGraspCenter(
   }
 }
 
-void SAMPublisher::GetFingerTips(
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::GetFingerTips(
     const Eigen::VectorXd &joint_angles,
     std::vector<Eigen::Vector3d> &finger_tips) const {
   gum::utils::GetFingerTips(m_robot_model, joint_angles, m_base_pose,
                             m_finger_offset, m_finger_ids, finger_tips);
 }
 
-void SAMPublisher::ExtractKeyPoints(Frame &curr_frame,
-                                    const uint8_t *mask_ptr) const {
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::ExtractKeyPoints(
+    FramePtr curr_frame, const uint8_t *mask_ptr) const {
   // Feature Extraction
   cv::Mat cropped_image;
-  const cv::Mat mask(curr_frame.image.size(), CV_8U, (void *)mask_ptr);
+  const cv::Mat mask(curr_frame->image.size(), CV_8U, (void *)mask_ptr);
   curr_frame
-      .image(cv::Range(curr_frame.bbox[1], curr_frame.bbox[3]),
-             cv::Range(curr_frame.bbox[0], curr_frame.bbox[2]))
+      ->image(cv::Range(curr_frame->bbox[1], curr_frame->bbox[3]),
+              cv::Range(curr_frame->bbox[0], curr_frame->bbox[2]))
       .copyTo(cropped_image,
-              mask(cv::Range(curr_frame.bbox[1], curr_frame.bbox[3]),
-                   cv::Range(curr_frame.bbox[0], curr_frame.bbox[2])));
+              mask(cv::Range(curr_frame->bbox[1], curr_frame->bbox[3]),
+                   cv::Range(curr_frame->bbox[0], curr_frame->bbox[2])));
   cv::cvtColor(cropped_image, cropped_image, cv::COLOR_RGB2GRAY);
   m_superpoint->Extract(cropped_image, m_initial_keypoints_v,
                         m_initial_normalized_keypoints_v,
                         m_initial_keypoint_scores_v, m_initial_descriptors_v);
 
   for (auto &initial_keypoint : m_initial_keypoints_v) {
-    initial_keypoint += curr_frame.offset;
+    initial_keypoint += curr_frame->offset;
   }
   int num_initial_keypoints = m_initial_keypoints_v.size();
   gum::perception::utils::SelectKeyPointsByDepth(
       num_initial_keypoints, m_min_depth, m_max_depth, m_depth_scale,
-      curr_frame.depth, m_initial_keypoints_v, m_initial_descriptors_v,
-      m_initial_normalized_keypoints_v, curr_frame.keypoints_v,
-      curr_frame.descriptors_v, curr_frame.normalized_keypoints_v);
+      curr_frame->depth, m_initial_keypoints_v, m_initial_descriptors_v,
+      m_initial_normalized_keypoints_v, curr_frame->keypoints_v,
+      curr_frame->descriptors_v, curr_frame->normalized_keypoints_v);
   gum::perception::utils::GetPointClouds(
-      curr_frame.keypoints_v.size(), m_intrinsics[0], m_intrinsics[1],
-      m_intrinsics[2], m_intrinsics[3], m_depth_scale, curr_frame.depth,
-      curr_frame.keypoints_v, curr_frame.point_clouds_v);
+      curr_frame->keypoints_v.size(), m_intrinsics[0], m_intrinsics[1],
+      m_intrinsics[2], m_intrinsics[3], m_depth_scale, curr_frame->depth,
+      curr_frame->keypoints_v, curr_frame->point_clouds_v);
 }
 
-void SAMPublisher::RefineKeyPoints(Frame &curr_frame) const {
-  auto is_valid = curr_frame.mask_cpu.data_ptr<uint8_t>();
-  int num_keypoints = curr_frame.keypoints_v.size();
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::RefineKeyPoints(
+    FramePtr curr_frame) const {
+  auto is_valid = curr_frame->mask_cpu.data_ptr<uint8_t>();
+  int num_keypoints = curr_frame->keypoints_v.size();
   m_initial_keypoints_v.clear();
   m_initial_descriptors_v.clear();
   m_initial_normalized_keypoints_v.clear();
 
   for (int n = 0; n < num_keypoints; n++) {
-    const auto &keypoint = curr_frame.keypoints_v[n];
+    const auto &keypoint = curr_frame->keypoints_v[n];
     int x = std::round(keypoint[0]);
     int y = std::round(keypoint[1]);
     if (is_valid[y * m_width + x]) {
-      m_initial_keypoints_v.push_back(curr_frame.keypoints_v[n]);
-      m_initial_descriptors_v.push_back(curr_frame.descriptors_v[n]);
+      m_initial_keypoints_v.push_back(curr_frame->keypoints_v[n]);
+      m_initial_descriptors_v.push_back(curr_frame->descriptors_v[n]);
       m_initial_normalized_keypoints_v.push_back(
-          curr_frame.normalized_keypoints_v[n]);
+          curr_frame->normalized_keypoints_v[n]);
     }
   }
-  std::swap(m_initial_keypoints_v, curr_frame.keypoints_v);
-  std::swap(m_initial_descriptors_v, curr_frame.descriptors_v);
+  std::swap(m_initial_keypoints_v, curr_frame->keypoints_v);
+  std::swap(m_initial_descriptors_v, curr_frame->descriptors_v);
   std::swap(m_initial_normalized_keypoints_v,
-            curr_frame.normalized_keypoints_v);
+            curr_frame->normalized_keypoints_v);
 
   gum::perception::utils::GetPointClouds(
-      curr_frame.keypoints_v.size(), m_intrinsics[0], m_intrinsics[1],
-      m_intrinsics[2], m_intrinsics[3], m_depth_scale, curr_frame.depth,
-      curr_frame.keypoints_v, curr_frame.point_clouds_v);
+      curr_frame->keypoints_v.size(), m_intrinsics[0], m_intrinsics[1],
+      m_intrinsics[2], m_intrinsics[3], m_depth_scale, curr_frame->depth,
+      curr_frame->keypoints_v, curr_frame->point_clouds_v);
 }
 
-void SAMPublisher::WriteFrame(const Frame &frame) const {
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::WriteFrame(FrameConstPtr frame) const {
   cv::Mat image;
-  cv::cvtColor(frame.image, image, CV_RGB2BGR);
+  cv::cvtColor(frame->image, image, CV_RGB2BGR);
 
-  const cv::Mat mask(image.size(), CV_8U, frame.mask_cpu.data_ptr<uint8_t>());
-  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) + "_mask.png",
-              mask);
+  const cv::Mat mask(image.size(), CV_8U, frame->mask_cpu.data_ptr<uint8_t>());
+  cv::imwrite(
+      m_result_path + "image_" + std::to_string(frame->id) + "_mask.png", mask);
 
   cv::Mat masked_image;
   image.copyTo(masked_image, mask);
-  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) +
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame->id) +
                   "_masked_color.jpg",
               masked_image);
 
   cv::Mat masked_depth;
-  frame.depth.copyTo(masked_depth, mask);
-  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) +
+  frame->depth.copyTo(masked_depth, mask);
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame->id) +
                   "_masked_depth.png",
               masked_depth);
 
   std::vector<cv::KeyPoint> cv_keypoints_v;
-  for (const auto &keypoint : frame.keypoints_v) {
+  for (const auto &keypoint : frame->keypoints_v) {
     cv_keypoints_v.push_back({keypoint[0], keypoint[1], 1});
   }
   cv::Mat masked_image_with_keypoints;
   cv::drawKeypoints(masked_image, cv_keypoints_v, masked_image_with_keypoints,
                     cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
-  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) +
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame->id) +
                   "_keypoints.jpg",
               masked_image_with_keypoints);
 
-  cv::rectangle(image, cv::Point(frame.bbox[0], frame.bbox[1]),
-                cv::Point(frame.bbox[2], frame.bbox[3]), cv::Scalar(0, 0, 255),
-                1, cv::LINE_8);
-  cv::imwrite(m_result_path + "image_" + std::to_string(frame.id) + "_bbox.jpg",
+  cv::rectangle(image, cv::Point(frame->bbox[0], frame->bbox[1]),
+                cv::Point(frame->bbox[2], frame->bbox[3]),
+                cv::Scalar(0, 0, 255), 1, cv::LINE_8);
+  cv::imwrite(m_result_path + "image_" + std::to_string(frame->id) +
+                  "_bbox.jpg",
               image);
 }
 
-void SAMPublisher::WriteMatch(
-    const Frame &prev_frame, const Frame &curr_frame,
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::WriteMatch(
+    FrameConstPtr prev_frame, FrameConstPtr curr_frame,
     const std::vector<Eigen::Vector2i> &matches_v) const {
   std::vector<cv::KeyPoint> prev_cv_keypoints_v;
   std::vector<cv::KeyPoint> curr_cv_keypoints_v;
   std::vector<cv::DMatch> cv_matches_v;
 
-  for (const auto &keypoint : prev_frame.keypoints_v) {
-    prev_cv_keypoints_v.push_back({keypoint[0] - prev_frame.offset[0],
-                                   keypoint[1] - prev_frame.offset[1], 1});
+  for (const auto &keypoint : prev_frame->keypoints_v) {
+    prev_cv_keypoints_v.push_back({keypoint[0] - prev_frame->offset[0],
+                                   keypoint[1] - prev_frame->offset[1], 1});
   }
 
-  for (const auto &keypoint : curr_frame.keypoints_v) {
-    curr_cv_keypoints_v.push_back({keypoint[0] - curr_frame.offset[0],
-                                   keypoint[1] - curr_frame.offset[1], 1});
+  for (const auto &keypoint : curr_frame->keypoints_v) {
+    curr_cv_keypoints_v.push_back({keypoint[0] - curr_frame->offset[0],
+                                   keypoint[1] - curr_frame->offset[1], 1});
   }
 
   for (const auto &match : matches_v) {
@@ -632,11 +645,11 @@ void SAMPublisher::WriteMatch(
   }
 
   auto prev_cropped_image =
-      prev_frame.image(cv::Range(prev_frame.bbox[1], prev_frame.bbox[3]),
-                       cv::Range(prev_frame.bbox[0], prev_frame.bbox[2]));
+      prev_frame->image(cv::Range(prev_frame->bbox[1], prev_frame->bbox[3]),
+                        cv::Range(prev_frame->bbox[0], prev_frame->bbox[2]));
   auto curr_cropped_image =
-      curr_frame.image(cv::Range(curr_frame.bbox[1], curr_frame.bbox[3]),
-                       cv::Range(curr_frame.bbox[0], curr_frame.bbox[2]));
+      curr_frame->image(cv::Range(curr_frame->bbox[1], curr_frame->bbox[3]),
+                        cv::Range(curr_frame->bbox[0], curr_frame->bbox[2]));
 
   cv::Mat cv_match_image;
   std::vector<char> cv_match_mask_v(cv_matches_v.size(), 1);
@@ -644,27 +657,30 @@ void SAMPublisher::WriteMatch(
                   curr_cv_keypoints_v, cv_matches_v, cv_match_image,
                   cv::Scalar::all(-1), cv::Scalar::all(-1), cv_match_mask_v,
                   cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
-  cv::imwrite(m_result_path + "image_" + std::to_string(curr_frame.id) +
+  cv::imwrite(m_result_path + "image_" + std::to_string(curr_frame->id) +
                   "_matched.jpg",
               cv_match_image);
 }
 
-void SAMPublisher::Publish(const Frame &frame,
-                           const std_msgs::msg::Header &header) const {
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::Publish(
+    FrameConstPtr frame, const std_msgs::msg::Header &header) const {
   cv::Mat masked_depth;
-  frame.depth.copyTo(masked_depth, cv::Mat(frame.depth.size(), CV_8U,
-                                           frame.mask_cpu.data_ptr<uint8_t>()));
+  frame->depth.copyTo(
+      masked_depth,
+      cv::Mat(frame->depth.size(), CV_8U, frame->mask_cpu.data_ptr<uint8_t>()));
   sensor_msgs::msg::Image::SharedPtr msg =
       cv_bridge::CvImage(header, "16UC1", masked_depth).toImageMsg();
-  msg->header.frame_id = std::to_string(frame.id);
-  m_segmentation_publisher->publish(*msg);
-  msg->header.frame_id = frame.id;
+  msg->header.frame_id = std::to_string(frame->id);
+  m_seg_depth_publisher->publish(*msg);
+  msg->header.frame_id = frame->id;
 }
 
-void SAMPublisher::CallBack(
-    const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
-    const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
-    const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) const {
+template <typename ColorMsg, typename DepthMsg>
+void SAMPublisher<ColorMsg, DepthMsg>::CallBack(
+    typename ColorMsg::ConstSharedPtr color_msg,
+    typename DepthMsg::ConstSharedPtr depth_msg,
+    typename JointMsg::ConstSharedPtr joint_msg) const {
   RCLCPP_INFO_STREAM(
       this->get_logger(),
       "=========================================================");
@@ -676,7 +692,11 @@ void SAMPublisher::CallBack(
   AddFrame(color_msg, depth_msg, joint_msg);
 
   auto curr_frame = m_frames_v.back();
-  Publish(*curr_frame, depth_msg->header);
+  Publish(curr_frame, depth_msg->header);
 }
+
+template class SAMPublisher<sensor_msgs::msg::CompressedImage,
+                            sensor_msgs::msg::Image>;
+template class SAMPublisher<sensor_msgs::msg::Image, sensor_msgs::msg::Image>;
 } // namespace perception
 } // namespace gum

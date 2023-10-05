@@ -21,30 +21,29 @@
 
 namespace gum {
 namespace perception {
+template <typename ColorMsg, typename DepthMsg>
 class SAMPublisher : public rclcpp::Node {
 public:
   using Frame = gum::perception::feature::Frame;
   using FramePtr = std::shared_ptr<Frame>;
   using FrameConstPtr = std::shared_ptr<const Frame>;
+  using JointMsg = sensor_msgs::msg::JointState;
+  using ImageMsg = sensor_msgs::msg::Image;
 
   SAMPublisher(const std::string &node_name);
 
   void Reset() const;
 
 protected:
-  using ApproximatePolicy = message_filters::sync_policies::ApproximateTime<
-      sensor_msgs::msg::Image, sensor_msgs::msg::Image,
-      sensor_msgs::msg::JointState>;
+  using ApproximatePolicy =
+      message_filters::sync_policies::ApproximateTime<ColorMsg, DepthMsg,
+                                                      JointMsg>;
   using Synchronizer = message_filters::Synchronizer<ApproximatePolicy>;
 
-  std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::Image>>
-      m_segmentation_publisher;
-  std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>>
-      m_color_subscriber;
-  std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>>
-      m_depth_subscriber;
-  std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::JointState>>
-      m_joint_subscriber;
+  std::shared_ptr<rclcpp::Publisher<ImageMsg>> m_seg_depth_publisher;
+  std::shared_ptr<message_filters::Subscriber<ColorMsg>> m_color_subscriber;
+  std::shared_ptr<message_filters::Subscriber<DepthMsg>> m_depth_subscriber;
+  std::shared_ptr<message_filters::Subscriber<JointMsg>> m_joint_subscriber;
   std::shared_ptr<Synchronizer> m_synchronizer;
 
   std::shared_ptr<gum::perception::segmentation::SAM> m_sam;
@@ -96,25 +95,23 @@ private:
                FramePtr curr_frame) const;
   void WarmUp() const;
 
-  void
-  AddFrame(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
-           const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
-           const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) const;
+  void AddFrame(typename ColorMsg::ConstSharedPtr color_msg,
+                typename DepthMsg::ConstSharedPtr depth_msg,
+                typename JointMsg::ConstSharedPtr joint_msg) const;
   void ProjectGraspCenter(const std::vector<Eigen::Vector3d> &finger_tips,
                           std::vector<Eigen::Vector2d> &finger_tip_centers,
                           Eigen::Vector2d &grasp_center) const;
   void GetFingerTips(const Eigen::VectorXd &joint_angles,
                      std::vector<Eigen::Vector3d> &finger_tips) const;
-  void ExtractKeyPoints(Frame &frame, const uint8_t *mask_ptr) const;
-  void RefineKeyPoints(Frame &frame) const;
-  void WriteFrame(const Frame &frame) const;
-  void WriteMatch(const Frame &prev_frame, const Frame &curr_frame,
+  void ExtractKeyPoints(FramePtr frame, const uint8_t *mask_ptr) const;
+  void RefineKeyPoints(FramePtr frame) const;
+  void WriteFrame(FrameConstPtr frame) const;
+  void WriteMatch(FrameConstPtr prev_frame, FrameConstPtr curr_frame,
                   const std::vector<Eigen::Vector2i> &matches_v) const;
-  void Publish(const Frame &frame, const std_msgs::msg::Header &header) const;
-  void
-  CallBack(const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
-           const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
-           const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) const;
+  void Publish(FrameConstPtr frame, const std_msgs::msg::Header &header) const;
+  void CallBack(typename ColorMsg::ConstSharedPtr color_msg,
+                typename DepthMsg::ConstSharedPtr depth_msg,
+                typename JointMsg::ConstSharedPtr joint_msg) const;
 };
 } // namespace perception
 } // namespace gum

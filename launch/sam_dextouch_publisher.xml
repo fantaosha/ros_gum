@@ -1,5 +1,5 @@
 <launch>
-    <node pkg="gum_perception" exec="sam_publisher" name="sam" namespace="gum">
+    <node pkg="gum_perception" exec="sam_dextouch_publisher" name="sam" namespace="gum">
         <param name="device" value="1" />
         <param name="height" value="480" />
         <param name="width" value="640" />
