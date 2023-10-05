@@ -131,7 +131,7 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
   m_joint_subscriber = std::make_shared<message_filters::Subscriber<JointMsg>>(
       this, joint_state_topic);
   m_synchronizer =
-      std::make_shared<Synchronizer>(ApproximatePolicy(20), *m_color_subscriber,
+      std::make_shared<Synchronizer>(ApproximatePolicy(100), *m_color_subscriber,
                                      *m_depth_subscriber, *m_joint_subscriber);
   m_synchronizer->registerCallback(
       std::bind(&SAMPublisher::SensorCallBack, this, _1, _2, _3));
