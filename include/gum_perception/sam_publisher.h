@@ -12,7 +12,7 @@
 
 #include <gum/graph/types.hpp>
 #include <gum/perception/bbox/bbox.h>
-#include <gum/perception/dataset/dataset.h>
+#include <gum/perception/camera/camera.h>
 #include <gum/perception/feature/fast_super_point.h>
 #include <gum/perception/feature/frame.cuh>
 #include <gum/perception/feature/light_glue.h>
@@ -24,6 +24,9 @@ namespace perception {
 class SAMPublisher : public rclcpp::Node {
 public:
   using Frame = gum::perception::feature::Frame;
+  using FramePtr = std::shared_ptr<Frame>;
+  using FrameConstPtr = std::shared_ptr<const Frame>;
+
   SAMPublisher(const std::string &node_name);
 
   void Reset() const;
@@ -73,11 +76,11 @@ protected:
   mutable std::vector<Eigen::Vector2f> m_initial_normalized_keypoints_v;
   mutable std::vector<Eigen::Vector3f> m_initial_point_clouds_v;
 
-  mutable std::shared_ptr<gum::perception::dataset::RealSenseDataset<
-      gum::perception::dataset::Device::GPU>>
-      m_realsense;
+  mutable std::shared_ptr<gum::perception::camera::RealSenseCamera<
+      gum::perception::camera::Device::GPU>>
+      m_realsense_camera;
   mutable std::vector<Eigen::VectorXd> m_joint_angles_v;
-  mutable std::vector<Frame> m_frames_v;
+  mutable std::vector<FramePtr> m_frames_v;
   mutable int m_num_frames = 0;
 
   int m_save_results = 0;
@@ -86,10 +89,11 @@ private:
   void Clear() const;
 
   void Initialize(const cv::Mat &image, const cv::Mat &depth,
-                  const Eigen::VectorXd &joint_angles, Frame &curr_frame) const;
+                  const Eigen::VectorXd &joint_angles,
+                  FramePtr curr_frame) const;
   void Iterate(const cv::Mat &image, const cv::Mat &depth,
-               const Eigen::VectorXd &joint_angles, const Frame &prev_frame,
-               Frame &curr_frame) const;
+               const Eigen::VectorXd &joint_angles, FrameConstPtr prev_frame,
+               FramePtr curr_frame) const;
   void WarmUp() const;
 
   void

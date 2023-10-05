@@ -147,11 +147,12 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
   m_ostracker = std::make_shared<gum::perception::bbox::OSTrack>(
       ostrack_checkpoint, trt_engine_cache_path, m_device);
 
-  m_realsense = std::make_shared<gum::perception::dataset::RealSenseDataset<
-      gum::perception::dataset::Device::GPU>>(
-      m_device, m_height, m_width, m_intrinsics[0], m_intrinsics[1],
-      m_intrinsics[2], m_intrinsics[3], m_intrinsics[4], m_intrinsics[5],
-      m_intrinsics[6], m_intrinsics[7], m_depth_scale);
+  m_realsense_camera =
+      std::make_shared<gum::perception::camera::RealSenseCamera<
+          gum::perception::camera::Device::GPU>>(
+          m_device, m_height, m_width, m_intrinsics[0], m_intrinsics[1],
+          m_intrinsics[2], m_intrinsics[3], m_intrinsics[4], m_intrinsics[5],
+          m_intrinsics[6], m_intrinsics[7], m_depth_scale);
 
   pinocchio::urdf::buildModel(meta_hand_urdf, m_robot_model);
 
@@ -166,7 +167,6 @@ SAMPublisher::SAMPublisher(const std::string &node_name)
 }
 
 void SAMPublisher::Reset() const {
-  m_realsense->Clear();
   m_frames_v.clear();
   m_joint_angles_v.clear();
   m_num_frames = 0;
@@ -179,10 +179,10 @@ void SAMPublisher::Clear() const {
 
 void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
                               const Eigen::VectorXd &joint_angles,
-                              Frame &curr_frame) const {
-  curr_frame.id = m_num_frames;
-  curr_frame.image = image;
-  curr_frame.depth = depth;
+                              FramePtr curr_frame) const {
+  curr_frame->id = m_num_frames;
+  curr_frame->image = image;
+  curr_frame->depth = depth;
 
   std::vector<Eigen::Vector3d> finger_tips;
   Eigen::Vector2d pixel_c;
@@ -191,11 +191,11 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
   GetFingerTips(joint_angles, finger_tips);
   ProjectGraspCenter(finger_tips, fingers_c, pixel_c);
   RCLCPP_INFO_STREAM(this->get_logger(),
-                     "Frame " << curr_frame.id
+                     "Frame " << curr_frame->id
                               << ": Grasp center has been computed.");
   if (m_save_results >= 1) {
     cv::Mat image;
-    cv::cvtColor(curr_frame.image, image, CV_RGB2BGR);
+    cv::cvtColor(curr_frame->image, image, CV_RGB2BGR);
     std::vector<cv::KeyPoint> cv_keypoints_v;
     for (const auto &keypoint : fingers_c) {
       cv_keypoints_v.push_back({(float)keypoint[0], (float)keypoint[1], 1});
@@ -204,19 +204,19 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
     cv::Mat image_with_tips;
     cv::drawKeypoints(image, cv_keypoints_v, image_with_tips,
                       cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
-    cv::imwrite(m_result_path + "image_" + std::to_string(curr_frame.id) +
+    cv::imwrite(m_result_path + "image_" + std::to_string(curr_frame->id) +
                     "_tips.jpg",
                 image_with_tips);
   }
 
-  m_sam->SetImage(curr_frame.image);
+  m_sam->SetImage(curr_frame->image);
   std::vector<Eigen::Vector2f> point_coords_v{pixel_c.cast<float>()};
   std::vector<float> point_labels_v(point_coords_v.size(), 1.0f);
   torch::Tensor masks, scores, logits;
   m_sam->Query(point_coords_v, point_labels_v, torch::nullopt, masks, scores,
                logits);
   RCLCPP_INFO_STREAM(this->get_logger(), "Frame "
-                                             << curr_frame.id
+                                             << curr_frame->id
                                              << ": Initial segmentation done.");
 
   float target_area = 0.03 * m_width * m_height;
@@ -227,8 +227,8 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
                 .item()
                 .toInt();
 
-  curr_frame.mask_gpu = masks[sel];
-  curr_frame.mask_cpu = masks[sel].to(torch::kCPU);
+  curr_frame->mask_gpu = masks[sel];
+  curr_frame->mask_cpu = masks[sel].to(torch::kCPU);
 
   if (m_save_results >= 1) {
     for (int i = 0; i < 3; i++) {
@@ -246,78 +246,80 @@ void SAMPublisher::Initialize(const cv::Mat &image, const cv::Mat &depth,
   auto orig_mask = masks[sel].to(torch::kInt16);
   gum::perception::utils::GetBox(m_height, m_width,
                                  (uint16_t *)orig_mask.data_ptr<int16_t>(),
-                                 curr_frame.bbox, m_handle->GetStream());
-  gum::perception::utils::RefineMask(m_height, m_width, curr_frame.bbox,
-                                     curr_frame.mask_cpu.data_ptr<uint8_t>());
+                                 curr_frame->bbox, m_handle->GetStream());
+  gum::perception::utils::RefineMask(m_height, m_width, curr_frame->bbox,
+                                     curr_frame->mask_cpu.data_ptr<uint8_t>());
   gum::perception::utils::GetBox(m_height, m_width,
                                  (uint16_t *)orig_mask.data_ptr<int16_t>(),
-                                 curr_frame.bbox, m_handle->GetStream());
-  curr_frame.mask_gpu = curr_frame.mask_cpu.to(curr_frame.mask_gpu.device());
-  curr_frame.offset = curr_frame.bbox.head<2>().cast<float>();
+                                 curr_frame->bbox, m_handle->GetStream());
+  curr_frame->mask_gpu = curr_frame->mask_cpu.to(curr_frame->mask_gpu.device());
+  curr_frame->offset = curr_frame->bbox.head<2>().cast<float>();
 
-  m_ostracker->Initialize(curr_frame.image, curr_frame.bbox.cast<float>());
+  m_ostracker->Initialize(curr_frame->image, curr_frame->bbox.cast<float>());
   RCLCPP_INFO_STREAM(this->get_logger(),
-                     "Frame " << curr_frame.id
+                     "Frame " << curr_frame->id
                               << ": Bounding box has been created.");
-  ExtractKeyPoints(curr_frame, curr_frame.mask_cpu.data_ptr<uint8_t>());
+  ExtractKeyPoints(*curr_frame, curr_frame->mask_cpu.data_ptr<uint8_t>());
   RCLCPP_INFO_STREAM(this->get_logger(),
-                     "Frame " << curr_frame.id << ": SuperPoint has extracted "
-                              << curr_frame.keypoints_v.size()
+                     "Frame " << curr_frame->id << ": SuperPoint has extracted "
+                              << curr_frame->keypoints_v.size()
                               << " keypoints.");
   if (m_save_results >= 1) {
-    WriteFrame(curr_frame);
+    WriteFrame(*curr_frame);
   }
 }
 
 void SAMPublisher::Iterate(const cv::Mat &image, const cv::Mat &depth,
                            const Eigen::VectorXd &joint_angles,
-                           const Frame &prev_frame, Frame &curr_frame) const {
-  curr_frame.id = m_num_frames;
-  curr_frame.image = image;
-  curr_frame.depth = depth;
+                           FrameConstPtr prev_frame,
+                           FramePtr curr_frame) const {
+  curr_frame->id = m_num_frames;
+  curr_frame->image = image;
+  curr_frame->depth = depth;
 
   Eigen::Vector4f init_bbox;
-  m_ostracker->Track(curr_frame.image, prev_frame.bbox.cast<float>(),
+  m_ostracker->Track(curr_frame->image, prev_frame->bbox.cast<float>(),
                      init_bbox);
-  curr_frame.bbox = (init_bbox.array() + 0.5f).cast<int>();
-  curr_frame.offset = curr_frame.bbox.head<2>().cast<float>();
+  curr_frame->bbox = (init_bbox.array() + 0.5f).cast<int>();
+  curr_frame->offset = curr_frame->bbox.head<2>().cast<float>();
 
   torch::Tensor extended_mask_cpu = torch::empty(
-      prev_frame.mask_cpu.sizes(),
+      prev_frame->mask_cpu.sizes(),
       torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU));
   int extended_radius = std::round(
       std::max(1.f, 0.080f * std::sqrt((init_bbox[3] - init_bbox[1]) *
                                        (init_bbox[2] - init_bbox[0]))));
-  int shrinked_radius = 1;
-  gum::perception::utils::ExtendMasks(m_height, m_width, curr_frame.bbox,
-                                      prev_frame.mask_cpu.data_ptr<uint8_t>(),
+  gum::perception::utils::ExtendMasks(m_height, m_width, curr_frame->bbox,
+                                      prev_frame->mask_cpu.data_ptr<uint8_t>(),
                                       extended_mask_cpu.data_ptr<uint8_t>(),
                                       extended_radius);
 
+  // TODO: shrinked_mask_cpu seems never used.
+  int shrinked_radius = 1;
   torch::Tensor shrinked_mask_cpu = torch::empty(
-      prev_frame.mask_cpu.sizes(),
+      prev_frame->mask_cpu.sizes(),
       torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU));
-  gum::perception::utils::ShrinkMasks(m_height, m_width, prev_frame.bbox,
-                                      prev_frame.mask_cpu.data_ptr<uint8_t>(),
+  gum::perception::utils::ShrinkMasks(m_height, m_width, prev_frame->bbox,
+                                      prev_frame->mask_cpu.data_ptr<uint8_t>(),
                                       shrinked_mask_cpu.data_ptr<uint8_t>(),
                                       shrinked_radius);
 
-  ExtractKeyPoints(curr_frame, extended_mask_cpu.data_ptr<uint8_t>());
+  ExtractKeyPoints(*curr_frame, extended_mask_cpu.data_ptr<uint8_t>());
   RCLCPP_INFO_STREAM(this->get_logger(),
-                     "Frame " << curr_frame.id << ": SuperPoint has extracted "
-                              << curr_frame.keypoints_v.size()
+                     "Frame " << curr_frame->id << ": SuperPoint has extracted "
+                              << curr_frame->keypoints_v.size()
                               << " keypoints.");
   // Feature Matching
   thrust::device_vector<int> d_initial_matches_v;
   std::vector<float> match_scores_v;
   std::vector<Eigen::Vector2i> initial_matches_v;
-  m_lightglue->Match(prev_frame.normalized_keypoints_v,
-                     curr_frame.normalized_keypoints_v,
-                     prev_frame.descriptors_v, curr_frame.descriptors_v,
+  m_lightglue->Match(prev_frame->normalized_keypoints_v,
+                     curr_frame->normalized_keypoints_v,
+                     prev_frame->descriptors_v, curr_frame->descriptors_v,
                      initial_matches_v, match_scores_v);
   int num_initial_matches = initial_matches_v.size();
   RCLCPP_INFO_STREAM(this->get_logger(),
-                     "Frame " << curr_frame.id << ": LightGlue has matched "
+                     "Frame " << curr_frame->id << ": LightGlue has matched "
                               << num_initial_matches << " pairs of keypoints.");
   d_initial_matches_v.resize(2 * num_initial_matches);
   gum::utils::HostArrayOfMatrixToDeviceMatrixOfArray(initial_matches_v,
@@ -325,20 +327,20 @@ void SAMPublisher::Iterate(const cv::Mat &image, const cv::Mat &depth,
   thrust::device_vector<int> d_matches_v;
   gum::perception::feature::RejectOutliers(
       *m_handle, m_graph_params, m_leiden_params, m_outlier_tolerance,
-      prev_frame.point_clouds_v.size() / 3,
-      curr_frame.point_clouds_v.size() / 3, num_initial_matches,
-      prev_frame.point_clouds_v, curr_frame.point_clouds_v, d_initial_matches_v,
-      d_matches_v);
+      prev_frame->point_clouds_v.size() / 3,
+      curr_frame->point_clouds_v.size() / 3, num_initial_matches,
+      prev_frame->point_clouds_v, curr_frame->point_clouds_v,
+      d_initial_matches_v, d_matches_v);
   int num_matches = d_matches_v.size() / 2;
   RCLCPP_INFO_STREAM(this->get_logger(),
-                     "Frame " << curr_frame.id << ": Outlier rejection keeps "
+                     "Frame " << curr_frame->id << ": Outlier rejection keeps "
                               << num_matches << "/" << num_initial_matches
                               << " pairs of keypoints.");
   Eigen::Matrix<float, 3, 4> relative_pose;
   gum::perception::feature::EstimateRelativePose(
-      *m_handle, prev_frame.point_clouds_v.size() / 3,
-      curr_frame.point_clouds_v.size() / 3, num_matches,
-      prev_frame.point_clouds_v, curr_frame.point_clouds_v, d_matches_v,
+      *m_handle, prev_frame->point_clouds_v.size() / 3,
+      curr_frame->point_clouds_v.size() / 3, num_matches,
+      prev_frame->point_clouds_v, curr_frame->point_clouds_v, d_matches_v,
       relative_pose);
 
   // Segmentation
@@ -347,47 +349,50 @@ void SAMPublisher::Iterate(const cv::Mat &image, const cv::Mat &depth,
   std::vector<int> selected_match_indices_v;
   std::vector<Eigen::Vector2f> point_coords_v;
   gum::perception::utils::SelectMatchesForSAM(
-      m_height, m_width, prev_frame.keypoints_v.size(),
-      curr_frame.keypoints_v.size(), num_matches, prev_frame.bbox.cast<float>(),
-      curr_frame.bbox.cast<float>(), prev_frame.mask_cpu.data_ptr<uint8_t>(),
-      prev_frame.mask_cpu.data_ptr<uint8_t>(), prev_frame.keypoints_v,
-      curr_frame.keypoints_v, matches_v, selected_match_indices_v,
+      m_height, m_width, prev_frame->keypoints_v.size(),
+      curr_frame->keypoints_v.size(), num_matches,
+      prev_frame->bbox.cast<float>(), curr_frame->bbox.cast<float>(),
+      prev_frame->mask_cpu.data_ptr<uint8_t>(),
+      prev_frame->mask_cpu.data_ptr<uint8_t>(), prev_frame->keypoints_v,
+      curr_frame->keypoints_v, matches_v, selected_match_indices_v,
       point_coords_v);
   std::vector<float> point_labels_v(point_coords_v.size(), 1.0f);
 
   torch::Tensor masks, scores, logits;
-  m_mobile_sam->SetImage(curr_frame.image);
+  m_mobile_sam->SetImage(curr_frame->image);
   m_mobile_sam->Query(point_coords_v, point_labels_v, init_bbox, masks, scores,
                       logits);
-  RCLCPP_INFO_STREAM(this->get_logger(),
-                     "Frame " << curr_frame.id << ": SAM has segmented image.");
-  curr_frame.mask_gpu = masks[0][1].to(torch::kUInt8);
-  curr_frame.mask_cpu = curr_frame.mask_gpu.to(torch::kCPU);
+  RCLCPP_INFO_STREAM(this->get_logger(), "Frame "
+                                             << curr_frame->id
+                                             << ": SAM has segmented image.");
+  curr_frame->mask_gpu = masks[0][1].to(torch::kUInt8);
+  curr_frame->mask_cpu = curr_frame->mask_gpu.to(torch::kCPU);
   gum::perception::utils::FilterMaskByDepth(
-      m_height, m_width, curr_frame.bbox, m_min_depth, m_max_depth,
-      m_depth_scale, curr_frame.depth, curr_frame.mask_cpu.data_ptr<uint8_t>());
-  gum::perception::utils::RefineMask(m_height, m_width, curr_frame.bbox,
-                                     curr_frame.mask_cpu.data_ptr<uint8_t>());
-  curr_frame.mask_gpu = curr_frame.mask_cpu.to(curr_frame.mask_gpu.device());
+      m_height, m_width, curr_frame->bbox, m_min_depth, m_max_depth,
+      m_depth_scale, curr_frame->depth,
+      curr_frame->mask_cpu.data_ptr<uint8_t>());
+  gum::perception::utils::RefineMask(m_height, m_width, curr_frame->bbox,
+                                     curr_frame->mask_cpu.data_ptr<uint8_t>());
+  curr_frame->mask_gpu = curr_frame->mask_cpu.to(curr_frame->mask_gpu.device());
 
   RCLCPP_INFO_STREAM(this->get_logger(),
-                     "Frame " << curr_frame.id
+                     "Frame " << curr_frame->id
                               << ": Segmentation has been refined.");
   if (m_save_results >= 2) {
-    WriteMatch(prev_frame, curr_frame, matches_v);
+    WriteMatch(*prev_frame, *curr_frame, matches_v);
   }
 
   // Refine Keypoints
-  int num_initial_keypoints = curr_frame.keypoints_v.size();
-  RefineKeyPoints(curr_frame);
-  int num_keypoints = curr_frame.keypoints_v.size();
+  int num_initial_keypoints = curr_frame->keypoints_v.size();
+  RefineKeyPoints(*curr_frame);
+  int num_keypoints = curr_frame->keypoints_v.size();
   RCLCPP_INFO_STREAM(this->get_logger(), "Frame "
-                                             << curr_frame.id
+                                             << curr_frame->id
                                              << ": Keypoints has been refined ("
                                              << num_keypoints << "/"
                                              << num_initial_keypoints << ").");
   if (m_save_results >= 1) {
-    WriteFrame(curr_frame);
+    WriteFrame(*curr_frame);
   }
 }
 
@@ -454,17 +459,29 @@ void SAMPublisher::AddFrame(
       cv_bridge::toCvCopy(color_msg, sensor_msgs::image_encodings::BGR8);
   depth_ptr = cv_bridge::toCvCopy(depth_msg, "16UC1");
 
-  double timestamp = double(color_msg->header.stamp.sec) +
-                     1e-9 * double(color_msg->header.stamp.nanosec);
-  m_realsense->AddFrame(
-      {timestamp, std::move(color_ptr->image), std::move(depth_ptr->image)});
+  // Rectify the color and depth
+  cv::Mat image, depth;
+  m_realsense_camera->Rectify(color_ptr->image, depth_ptr->image, image, depth);
   Eigen::Map<const Eigen::VectorXd> raw_joint_angles(
       joint_msg->position.data(), joint_msg->position.size());
+
+  // Save joint angles
   Eigen::VectorXd joint_angles(m_robot_model.nq);
   joint_angles.segment<4>(0) = raw_joint_angles.segment<4>(0);
   joint_angles.segment<4>(4) = raw_joint_angles.segment<4>(12);
   joint_angles.segment<8>(8) = raw_joint_angles.segment<8>(4);
   m_joint_angles_v.push_back(std::move(joint_angles));
+
+  FramePtr curr_frame = std::make_shared<Frame>();
+  if (m_num_frames == 0) {
+    Initialize(image, depth, m_joint_angles_v.back(), curr_frame);
+  } else {
+    const auto &prev_frame = m_frames_v.back();
+    Iterate(image, depth, m_joint_angles_v.back(), prev_frame, curr_frame);
+  }
+
+  m_frames_v.push_back(curr_frame);
+  m_num_frames++;
 }
 
 void SAMPublisher::ProjectGraspCenter(
@@ -658,7 +675,6 @@ void SAMPublisher::CallBack(
     const sensor_msgs::msg::Image::ConstSharedPtr &color_msg,
     const sensor_msgs::msg::Image::ConstSharedPtr &depth_msg,
     const sensor_msgs::msg::JointState::ConstSharedPtr &joint_msg) const {
-  this->AddFrame(color_msg, depth_msg, joint_msg);
   RCLCPP_INFO_STREAM(
       this->get_logger(),
       "=========================================================");
@@ -667,22 +683,10 @@ void SAMPublisher::CallBack(
       this->get_logger(),
       "---------------------------------------------------------");
 
-  Frame curr_frame;
-  if (m_num_frames == 0) {
-    Initialize(m_realsense->GetFrames().back().image,
-               m_realsense->GetFrames().back().depth, m_joint_angles_v.back(),
-               curr_frame);
-  } else {
-    const auto &prev_frame = m_frames_v.back();
-    Iterate(m_realsense->GetFrames().back().image,
-            m_realsense->GetFrames().back().depth, m_joint_angles_v.back(),
-            prev_frame, curr_frame);
-  }
+  AddFrame(color_msg, depth_msg, joint_msg);
 
-  Publish(m_frames_v.back(), depth_msg->header);
-
-  m_frames_v.push_back(std::move(curr_frame));
-  m_num_frames++;
+  auto curr_frame = m_frames_v.back();
+  Publish(*curr_frame, depth_msg->header);
 }
 } // namespace perception
 } // namespace gum
