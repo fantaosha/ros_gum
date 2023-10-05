@@ -1,0 +1,6 @@
+<launch>
+    <node pkg="gum_perception" exec="sam_commander" name="sam_cmd" namespace="gum" output="screen"
+        launch-prefix="screen -d -m gdb -ex run --args">
+        <param name="command_topic" value="sam_cmd" />
+    </node>
+</launch>
