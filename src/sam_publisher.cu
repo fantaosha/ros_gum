@@ -294,16 +294,6 @@ void SAMPublisher::Iterate(const cv::Mat &image, const cv::Mat &depth,
                                       extended_mask_cpu.data_ptr<uint8_t>(),
                                       extended_radius);
 
-  // TODO: shrinked_mask_cpu seems never used.
-  int shrinked_radius = 1;
-  torch::Tensor shrinked_mask_cpu = torch::empty(
-      prev_frame->mask_cpu.sizes(),
-      torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU));
-  gum::perception::utils::ShrinkMasks(m_height, m_width, prev_frame->bbox,
-                                      prev_frame->mask_cpu.data_ptr<uint8_t>(),
-                                      shrinked_mask_cpu.data_ptr<uint8_t>(),
-                                      shrinked_radius);
-
   ExtractKeyPoints(*curr_frame, extended_mask_cpu.data_ptr<uint8_t>());
   RCLCPP_INFO_STREAM(this->get_logger(),
                      "Frame " << curr_frame->id << ": SuperPoint has extracted "
