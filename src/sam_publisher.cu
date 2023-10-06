@@ -191,7 +191,7 @@ void SAMPublisher<ColorMsg, DepthMsg>::Clear() const {
 }
 
 template <typename ColorMsg, typename DepthMsg>
-void SAMPublisher<ColorMsg, DepthMsg>::Initialize(
+bool SAMPublisher<ColorMsg, DepthMsg>::Initialize(
     const cv::Mat &image, const cv::Mat &depth,
     const Eigen::VectorXd &joint_angles, FramePtr curr_frame) const {
   curr_frame->id = m_num_frames;
@@ -232,19 +232,13 @@ void SAMPublisher<ColorMsg, DepthMsg>::Initialize(
   RCLCPP_INFO_STREAM(this->get_logger(), "Frame "
                                              << curr_frame->id
                                              << ": Initial segmentation done.");
-
-  float target_area = 0.025 * m_width * m_height;
   masks = masks[0].to(torch::kUInt8);
-  auto areas = masks.sum({1, 2}).to(torch::kCPU);
-  int sel = (areas - target_area).abs().argmin().item().toInt();
-
-  curr_frame->mask_gpu = masks[sel];
-  curr_frame->mask_cpu = masks[sel].to(torch::kCPU);
+  auto masks_cpu = masks.to(torch::kCPU);
 
   if (m_save_results >= 1) {
     for (int i = 0; i < 3; i++) {
       const cv::Mat mask(image.size(), CV_8U,
-                         masks[i].to(torch::kCPU).data_ptr<uint8_t>());
+                         masks_cpu[i].to(torch::kCPU).data_ptr<uint8_t>());
       cv::Mat masked_image;
       image.copyTo(masked_image, mask);
       cv::cvtColor(masked_image, masked_image, CV_RGB2BGR);
@@ -254,19 +248,42 @@ void SAMPublisher<ColorMsg, DepthMsg>::Initialize(
     }
   }
 
-  auto orig_mask = masks[sel].to(torch::kInt16);
-  gum::perception::utils::GetBox(m_height, m_width,
-                                 (uint16_t *)orig_mask.data_ptr<int16_t>(),
-                                 curr_frame->bbox, m_handle->GetStream());
-  gum::perception::utils::RefineMask(m_height, m_width, curr_frame->bbox,
-                                     curr_frame->mask_cpu.data_ptr<uint8_t>());
-  curr_frame->mask_gpu = curr_frame->mask_cpu.to(curr_frame->mask_gpu.device());
+  float target_area = 0.03 * m_width * m_height;
+  std::vector<Eigen::Vector4i> bboxes(3);
+  for (int n = 0; n < 3; n++) {
+    bboxes[n] = {0, 0, m_width - 1, m_height - 1};
+    gum::perception::utils::RefineMask(m_height, m_width, bboxes[n],
+                                       masks_cpu[n].data_ptr<uint8_t>());
+  }
+  masks = masks_cpu.to(masks.device());
+  Eigen::Vector3f mask_scores = Eigen::Map<Eigen::Vector3f>(
+      scores.to(torch::kCPU).to(torch::kFloat32).data_ptr<float>());
+  Eigen::Vector3f mask_areas = Eigen::Map<Eigen::Vector3f>(
+      masks.sum({1, 2}).to(torch::kCPU).to(torch::kFloat32).data_ptr<float>());
 
-  auto refined_mask = curr_frame->mask_gpu.to(torch::kInt16);
-  gum::perception::utils::GetBox(m_height, m_width,
-                                 (uint16_t *)refined_mask.data_ptr<int16_t>(),
-                                 curr_frame->bbox, m_handle->GetStream());
+  int sel = -1;
+  float min_area_error = std::numeric_limits<float>::max();
+  for (int n = 0; n < 3; n++) {
+    float dw = bboxes[n][2] - bboxes[n][0] + 1;
+    float dh = bboxes[n][3] - bboxes[n][1] + 1;
+
+    if ((dw <= 200 && dh <= 200) && (dw >= 50 || dh >= 50)) {
+      float area_error = std::fabs(mask_areas[n] - target_area);
+      if (area_error < min_area_error) {
+        sel = n;
+        min_area_error = area_error;
+      }
+    }
+  }
+
+  if (sel == -1) {
+    return false;
+  }
+
+  curr_frame->mask_gpu = masks[sel];
+  curr_frame->bbox = bboxes[sel];
   curr_frame->offset = curr_frame->bbox.head<2>().cast<float>();
+  curr_frame->mask_cpu = masks[sel].to(torch::kCPU);
 
   m_ostracker->Initialize(curr_frame->image, curr_frame->bbox.cast<float>());
   RCLCPP_INFO_STREAM(this->get_logger(),
@@ -280,10 +297,12 @@ void SAMPublisher<ColorMsg, DepthMsg>::Initialize(
   if (m_save_results >= 1) {
     WriteFrame(curr_frame);
   }
+
+  return true;
 }
 
 template <typename ColorMsg, typename DepthMsg>
-void SAMPublisher<ColorMsg, DepthMsg>::Iterate(
+bool SAMPublisher<ColorMsg, DepthMsg>::Iterate(
     const cv::Mat &image, const cv::Mat &depth,
     const Eigen::VectorXd &joint_angles, FrameConstPtr prev_frame,
     FramePtr curr_frame) const {
@@ -369,7 +388,23 @@ void SAMPublisher<ColorMsg, DepthMsg>::Iterate(
   RCLCPP_INFO_STREAM(this->get_logger(), "Frame "
                                              << curr_frame->id
                                              << ": SAM has segmented image.");
-  curr_frame->mask_gpu = masks[0][1].to(torch::kUInt8);
+
+  masks = masks[0].to(torch::kUInt8);
+  auto masks_cpu = masks.to(torch::kCPU);
+  if (m_save_results >= 1) {
+    for (int i = 0; i < 3; i++) {
+      const cv::Mat mask(image.size(), CV_8U,
+                         masks_cpu[i].to(torch::kCPU).data_ptr<uint8_t>());
+      cv::Mat masked_image;
+      image.copyTo(masked_image, mask);
+      cv::cvtColor(masked_image, masked_image, CV_RGB2BGR);
+      cv::imwrite(m_result_path + "image_" + std::to_string(curr_frame->id) +
+                      "_masked_" + std::to_string(i) + ".jpg",
+                  masked_image);
+    }
+  }
+
+  curr_frame->mask_gpu = masks[1].to(torch::kUInt8);
   curr_frame->mask_cpu = curr_frame->mask_gpu.to(torch::kCPU);
   gum::perception::utils::FilterMaskByDepth(
       m_height, m_width, curr_frame->bbox, m_min_depth, m_max_depth,
@@ -398,6 +433,8 @@ void SAMPublisher<ColorMsg, DepthMsg>::Iterate(
   if (m_save_results >= 1) {
     WriteFrame(curr_frame);
   }
+
+  return true;
 }
 
 template <typename ColorMsg, typename DepthMsg>
@@ -416,20 +453,14 @@ void SAMPublisher<ColorMsg, DepthMsg>::WarmUp() const {
   int height = test_image.rows;
   int width = test_image.cols;
 
-  std::vector<Eigen::Vector2f> point_coords_v{{0.5f * width, 0.5f * height}};
+  std::vector<Eigen::Vector2f> point_coords_v{
+      {407.529712993177, 184.94332325666036}};
   Eigen::Vector4f bbox = {point_coords_v[0][0] - 0.2f * width,
                           point_coords_v[0][1] - 0.2f * height,
                           point_coords_v[0][0] + 0.2f * width,
                           point_coords_v[0][1] + 0.2f * height};
   std::vector<float> point_labels_v(point_coords_v.size(), 1.0f);
   torch::Tensor masks, scores, logits;
-  for (int i = 0; i < 2; i++) {
-    m_mobile_sam->SetImage(test_image);
-    m_mobile_sam->Query(point_coords_v, point_labels_v, bbox, masks, scores,
-                        logits);
-    m_sam->SetImage(test_image);
-    m_sam->Query(point_coords_v, point_labels_v, bbox, masks, scores, logits);
-  }
 
   m_ostracker->Initialize(test_image, bbox);
   for (int i = 0; i < 5; i++) {
@@ -452,6 +483,12 @@ void SAMPublisher<ColorMsg, DepthMsg>::WarmUp() const {
                        m_initial_normalized_keypoints_v,
                        m_initial_descriptors_v, m_initial_descriptors_v,
                        initial_matches_v, match_scores_v);
+  }
+
+  for (int i = 0; i < 2; i++) {
+    m_sam->SetImage(test_image);
+    m_sam->Query(point_coords_v, point_labels_v, torch::nullopt, masks, scores,
+                 logits);
   }
 }
 
@@ -481,15 +518,19 @@ void SAMPublisher<ColorMsg, DepthMsg>::AddFrame(
 
   // Add frame
   FramePtr curr_frame = std::make_shared<Frame>();
+  bool is_valid = false;
   if (m_num_frames == 0) {
-    Initialize(image, depth, m_joint_angles_v.back(), curr_frame);
+    is_valid = Initialize(image, depth, m_joint_angles_v.back(), curr_frame);
   } else {
     const auto prev_frame = m_frames_v.back();
-    Iterate(image, depth, m_joint_angles_v.back(), prev_frame, curr_frame);
+    is_valid =
+        Iterate(image, depth, m_joint_angles_v.back(), prev_frame, curr_frame);
   }
 
-  m_frames_v.push_back(curr_frame);
-  m_num_frames++;
+  if (is_valid) {
+    m_frames_v.push_back(curr_frame);
+    m_num_frames++;
+  }
 }
 
 template <typename ColorMsg, typename DepthMsg>

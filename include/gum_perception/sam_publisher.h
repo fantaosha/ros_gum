@@ -92,10 +92,10 @@ protected:
 private:
   void Clear() const;
 
-  void Initialize(const cv::Mat &image, const cv::Mat &depth,
+  bool Initialize(const cv::Mat &image, const cv::Mat &depth,
                   const Eigen::VectorXd &joint_angles,
                   FramePtr curr_frame) const;
-  void Iterate(const cv::Mat &image, const cv::Mat &depth,
+  bool Iterate(const cv::Mat &image, const cv::Mat &depth,
                const Eigen::VectorXd &joint_angles, FrameConstPtr prev_frame,
                FramePtr curr_frame) const;
   void WarmUp() const;
