@@ -393,22 +393,22 @@ bool SAMPublisher<ColorMsg, DepthMsg>::Iterate(
                                              << curr_frame->id
                                              << ": SAM has segmented image.");
 
-  masks = masks[0].to(torch::kUInt8);
-  auto masks_cpu = masks.to(torch::kCPU);
-  if (m_save_results >= 1) {
-    for (int i = 0; i < 3; i++) {
-      const cv::Mat mask(image.size(), CV_8U,
-                         masks_cpu[i].to(torch::kCPU).data_ptr<uint8_t>());
-      cv::Mat masked_image;
-      image.copyTo(masked_image, mask);
-      cv::cvtColor(masked_image, masked_image, CV_RGB2BGR);
-      cv::imwrite(m_result_path + "image_" + std::to_string(curr_frame->id) +
-                      "_masked_" + std::to_string(i) + ".jpg",
-                  masked_image);
-    }
-  }
+  // if (m_save_results >= 1) {
+  //   masks = masks[0].to(torch::kUInt8);
+  //   auto masks_cpu = masks.to(torch::kCPU);
+  //   for (int i = 0; i < 3; i++) {
+  //     const cv::Mat mask(image.size(), CV_8U,
+  //                        masks_cpu[i].to(torch::kCPU).data_ptr<uint8_t>());
+  //     cv::Mat masked_image;
+  //     image.copyTo(masked_image, mask);
+  //     cv::cvtColor(masked_image, masked_image, CV_RGB2BGR);
+  //     cv::imwrite(m_result_path + "image_" + std::to_string(curr_frame->id) +
+  //                     "_masked_" + std::to_string(i) + ".jpg",
+  //                 masked_image);
+  //   }
+  // }
 
-  curr_frame->mask_gpu = masks[1].to(torch::kUInt8);
+  curr_frame->mask_gpu = masks[0][1].to(torch::kUInt8);
   curr_frame->mask_cpu = curr_frame->mask_gpu.to(torch::kCPU);
   gum::perception::utils::FilterMaskByDepth(
       m_height, m_width, curr_frame->bbox, m_min_depth, m_max_depth,
