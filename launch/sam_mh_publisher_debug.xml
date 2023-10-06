@@ -30,8 +30,8 @@
         <param name="joint_state_topic" value="/allegroHand/joint_states" />
         <param name="color_topic" value="/realsense_front/color/image_raw" />
         <param name="depth_topic" value="/realsense_front/aligned_depth_to_color/image_raw" />
-        <param name="seg_depth_topic" value="/realsense_front_left/seg_depth" />
-        <param name="seg_color_topic" value="/realsense_front_left/seg_color" />
+        <param name="seg_depth_topic" value="/realsense_front/seg_depth" />
+        <param name="seg_color_topic" value="/realsense_front/seg_color" />
         <param name="sam_encoder" value="sam_vit_l_encoder.jit" />
         <param name="sam_decoder" value="sam_vit_l_decoder.jit" />
         <param name="mobile_sam_encoder" value="mobile_sam_encoder.jit" />

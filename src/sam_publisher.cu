@@ -737,6 +737,7 @@ void SAMPublisher<ColorMsg, DepthMsg>::Publish(
   frame->image.copyTo(
       masked_color,
       cv::Mat(frame->image.size(), CV_8U, frame->mask_cpu.data_ptr<uint8_t>()));
+  cv::cvtColor(masked_color, masked_color, cv::COLOR_RGB2BGR);
   sensor_msgs::msg::Image::SharedPtr color_msg =
       cv_bridge::CvImage(header, "8UC3", masked_color).toImageMsg();
   color_msg->header.frame_id = std::to_string(frame->id);
