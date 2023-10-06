@@ -1,5 +1,5 @@
 <launch>
-    <node pkg="gum_perception" exec="sam_publisher" name="sam" namespace="gum">
+    <node pkg="gum_perception" exec="sam_metahand_publisher" name="sam" namespace="gum">
         <param name="command_topic" value="sam_cmd" />
         <param name="device" value="0" />
         <param name="height" value="480" />

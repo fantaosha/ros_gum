@@ -130,9 +130,9 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
       this, depth_topic);
   m_joint_subscriber = std::make_shared<message_filters::Subscriber<JointMsg>>(
       this, joint_state_topic);
-  m_synchronizer =
-      std::make_shared<Synchronizer>(ApproximatePolicy(100), *m_color_subscriber,
-                                     *m_depth_subscriber, *m_joint_subscriber);
+  m_synchronizer = std::make_shared<Synchronizer>(
+      ApproximatePolicy(100), *m_color_subscriber, *m_depth_subscriber,
+      *m_joint_subscriber);
   m_synchronizer->registerCallback(
       std::bind(&SAMPublisher::SensorCallBack, this, _1, _2, _3));
 
@@ -233,13 +233,10 @@ void SAMPublisher<ColorMsg, DepthMsg>::Initialize(
                                              << curr_frame->id
                                              << ": Initial segmentation done.");
 
-  float target_area = 0.03 * m_width * m_height;
+  float target_area = 0.025 * m_width * m_height;
   masks = masks[0].to(torch::kUInt8);
-  int sel = (masks.sum({1, 2}).to(torch::kCPU) - target_area)
-                .abs()
-                .argmin()
-                .item()
-                .toInt();
+  auto areas = masks.sum({1, 2}).to(torch::kCPU);
+  int sel = (areas - target_area).abs().argmin().item().toInt();
 
   curr_frame->mask_gpu = masks[sel];
   curr_frame->mask_cpu = masks[sel].to(torch::kCPU);
