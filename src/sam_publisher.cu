@@ -45,7 +45,8 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
   this->declare_parameter("depth_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("joint_state_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("command_topic", rclcpp::PARAMETER_STRING);
-  this->declare_parameter("segmentation_topic", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("seg_depth_topic", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("seg_color_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("meta_hand_urdf", rclcpp::PARAMETER_STRING);
   this->declare_parameter("model_path", rclcpp::PARAMETER_STRING);
   this->declare_parameter("sam_encoder", rclcpp::PARAMETER_STRING);
@@ -97,8 +98,10 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
       this->get_parameter("joint_state_topic").as_string();
   const std::string cmd_topic =
       this->get_parameter("command_topic").as_string();
-  const std::string sam_topic =
-      this->get_parameter("segmentation_topic").as_string();
+  const std::string seg_depth_topic =
+      this->get_parameter("seg_depth_topic").as_string();
+  const std::string seg_color_topic =
+      this->get_parameter("seg_color_topic").as_string();
   const std::string meta_hand_urdf =
       this->get_parameter("meta_hand_urdf").as_string();
   const std::string model_path = this->get_parameter("model_path").as_string();
@@ -123,7 +126,8 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
   using std::placeholders::_2;
   using std::placeholders::_3;
 
-  m_seg_depth_publisher = this->create_publisher<ImageMsg>(sam_topic, 10);
+  m_seg_depth_publisher = this->create_publisher<ImageMsg>(seg_depth_topic, 10);
+  m_seg_color_publisher = this->create_publisher<ImageMsg>(seg_color_topic, 10);
   m_color_subscriber = std::make_shared<message_filters::Subscriber<ColorMsg>>(
       this, color_topic);
   m_depth_subscriber = std::make_shared<message_filters::Subscriber<DepthMsg>>(
@@ -723,11 +727,21 @@ void SAMPublisher<ColorMsg, DepthMsg>::Publish(
   frame->depth.copyTo(
       masked_depth,
       cv::Mat(frame->depth.size(), CV_8U, frame->mask_cpu.data_ptr<uint8_t>()));
-  sensor_msgs::msg::Image::SharedPtr msg =
+  sensor_msgs::msg::Image::SharedPtr depth_msg =
       cv_bridge::CvImage(header, "16UC1", masked_depth).toImageMsg();
-  msg->header.frame_id = std::to_string(frame->id);
-  m_seg_depth_publisher->publish(*msg);
-  msg->header.frame_id = frame->id;
+  depth_msg->header.frame_id = std::to_string(frame->id);
+  m_seg_depth_publisher->publish(*depth_msg);
+  depth_msg->header.frame_id = frame->id;
+
+  cv::Mat masked_color;
+  frame->image.copyTo(
+      masked_color,
+      cv::Mat(frame->image.size(), CV_8U, frame->mask_cpu.data_ptr<uint8_t>()));
+  sensor_msgs::msg::Image::SharedPtr color_msg =
+      cv_bridge::CvImage(header, "8UC3", masked_color).toImageMsg();
+  color_msg->header.frame_id = std::to_string(frame->id);
+  m_seg_color_publisher->publish(*color_msg);
+  color_msg->header.frame_id = frame->id;
 }
 
 template <typename ColorMsg, typename DepthMsg>

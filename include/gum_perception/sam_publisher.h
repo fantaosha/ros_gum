@@ -42,6 +42,7 @@ protected:
   using Synchronizer = message_filters::Synchronizer<ApproximatePolicy>;
 
   std::shared_ptr<rclcpp::Publisher<ImageMsg>> m_seg_depth_publisher;
+  std::shared_ptr<rclcpp::Publisher<ImageMsg>> m_seg_color_publisher;
   std::shared_ptr<message_filters::Subscriber<ColorMsg>> m_color_subscriber;
   std::shared_ptr<message_filters::Subscriber<DepthMsg>> m_depth_subscriber;
   std::shared_ptr<message_filters::Subscriber<JointMsg>> m_joint_subscriber;
