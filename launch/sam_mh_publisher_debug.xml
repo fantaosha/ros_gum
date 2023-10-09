@@ -3,11 +3,6 @@
         launch-prefix="screen -d -m gdb -ex run --args">
         <param name="command_topic" value="sam_cmd" />
         <param name="device" value="0" />
-        <param name="height" value="480" />
-        <param name="width" value="640" />
-        <param name="intrinsics"
-            value="[615.0073931049496, 614.3857762049058, 326.1533471461406, 234.2844635618677, 0.1272466505998945, -0.2810470538567604, -0.0013263207505766492, 0.0006093121906229885]" />
-        <param name="depth_scale" value="0.001" />
         <param name="min_depth" value="0.15" />
         <param name="max_depth" value="0.85" />
         <param name="match_graph_delta" value="1e-2" />
@@ -16,10 +11,9 @@
         <param name="leiden_beta" value="1e-3" />
         <param name="leiden_resolution" value="1.15" />
         <param name="outlier_tolerance" value="2e-3" />
-        <param name="base_pose"
-            value="[1.0000, 0.0000, 0.0000, 0.0000, 1.0000, 0.0000, 0.0000, 0.0000, 1.0000, 0.0000, 0.0000, 0.0000]" />
-        <param name="pose_wc"
-            value="[0.017820410430431366, 0.35532617568969727, -0.9345724582672119, 0.3067612946033478, 0.8876969814300537, 0.34335336089134216, 0.9516196250915527, -0.2928093671798706, -0.09318119287490845, 0.5147740840911865, -0.19989359378814697, -0.04227131977677345]" />
+        <param name="calibration" value="data/metahand_calibration.yaml" />
+        <param name="base_pose" value="allegro_base_pose" />
+        <param name="camera" value="realsense_front_left" />
         <param name="finger_offset" value="[-2.1320e-03, 2.1000e-05, 1.7545e-02]" />
         <param name="sam_offset" value="0.0" />
         <param name="save_results" value="1" />

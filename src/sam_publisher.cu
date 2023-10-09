@@ -8,6 +8,7 @@
 #include <gum/utils/utils.h>
 #include <opencv2/imgproc.hpp>
 #include <pinocchio/parsers/urdf.hpp>
+#include <yaml-cpp/yaml.h>
 
 #define STOP 'w'
 #define START 's'
@@ -21,10 +22,6 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
     : rclcpp::Node(node_name) {
   // Declare Parameters
   this->declare_parameter("device", rclcpp::PARAMETER_INTEGER);
-  this->declare_parameter("height", rclcpp::PARAMETER_INTEGER);
-  this->declare_parameter("width", rclcpp::PARAMETER_INTEGER);
-  this->declare_parameter("intrinsics", rclcpp::PARAMETER_DOUBLE_ARRAY);
-  this->declare_parameter("depth_scale", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("min_depth", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("max_depth", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("match_graph_delta", rclcpp::PARAMETER_DOUBLE);
@@ -33,13 +30,15 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
   this->declare_parameter("leiden_beta", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("leiden_resolution", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("outlier_tolerance", rclcpp::PARAMETER_DOUBLE);
-  this->declare_parameter("base_pose", rclcpp::PARAMETER_DOUBLE_ARRAY);
-  this->declare_parameter("pose_wc", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("finger_offset", rclcpp::PARAMETER_DOUBLE_ARRAY);
   this->declare_parameter("sam_offset", rclcpp::PARAMETER_DOUBLE);
   this->declare_parameter("finger_ids", rclcpp::PARAMETER_INTEGER_ARRAY);
   this->declare_parameter("save_results", rclcpp::PARAMETER_INTEGER);
   this->declare_parameter("result_path", rclcpp::PARAMETER_STRING);
+
+  this->declare_parameter("calibration", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("base_pose", rclcpp::PARAMETER_STRING);
+  this->declare_parameter("camera", rclcpp::PARAMETER_STRING);
 
   this->declare_parameter("color_topic", rclcpp::PARAMETER_STRING);
   this->declare_parameter("depth_topic", rclcpp::PARAMETER_STRING);
@@ -61,12 +60,6 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
 
   // Get Parameters
   m_device = this->get_parameter("device").as_int();
-  m_height = this->get_parameter("height").as_int();
-  m_width = this->get_parameter("width").as_int();
-  m_intrinsics = Eigen::Map<const Eigen::Vector<double, 8>>(
-                     this->get_parameter("intrinsics").as_double_array().data())
-                     .cast<float>();
-  m_depth_scale = this->get_parameter("depth_scale").as_double();
   m_min_depth = this->get_parameter("min_depth").as_double();
   m_max_depth = this->get_parameter("max_depth").as_double();
   m_graph_params.delta = this->get_parameter("match_graph_delta").as_double();
@@ -77,10 +70,6 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
   m_leiden_params.resolution =
       this->get_parameter("leiden_resolution").as_double();
   m_outlier_tolerance = this->get_parameter("outlier_tolerance").as_double();
-  m_base_pose = Eigen::Map<const Eigen::Matrix<double, 3, 4>>(
-      this->get_parameter("base_pose").as_double_array().data());
-  m_pose_wc = Eigen::Map<const Eigen::Matrix<double, 3, 4>>(
-      this->get_parameter("pose_wc").as_double_array().data());
   m_finger_offset = Eigen::Map<const Eigen::Vector3d>(
       this->get_parameter("finger_offset").as_double_array().data());
   m_sam_offset = this->get_parameter("sam_offset").as_double();
@@ -89,6 +78,57 @@ SAMPublisher<ColorMsg, DepthMsg>::SAMPublisher(const std::string &node_name)
   std::copy(finger_ids.begin(), finger_ids.end(), m_finger_ids.begin());
   m_save_results = this->get_parameter("save_results").as_int();
   m_result_path = this->get_parameter("result_path").as_string();
+
+  auto load_pose_yaml = [](const auto &config) {
+    Eigen::Matrix<double, 3, 4> pose;
+    Eigen::Quaterniond q;
+    auto t = pose.col(3);
+
+    auto rotation_config = config["rotation"];
+    auto translaton_config = config["translation"];
+    q.w() = rotation_config["w"].template as<double>();
+    q.x() = rotation_config["x"].template as<double>();
+    q.y() = rotation_config["y"].template as<double>();
+    q.z() = rotation_config["z"].template as<double>();
+    t[0] = translaton_config["x"].template as<double>();
+    t[1] = translaton_config["y"].template as<double>();
+    t[2] = translaton_config["z"].template as<double>();
+    pose.leftCols<3>() = q.toRotationMatrix();
+
+    return pose;
+  };
+
+  auto load_camera_yaml = [](const auto &config) {
+    Eigen::Vector<double, 10> camera_info;
+    camera_info[0] = config["h"].template as<double>();
+    camera_info[1] = config["w"].template as<double>();
+    camera_info[2] = config["fx"].template as<double>();
+    camera_info[3] = config["fy"].template as<double>();
+    camera_info[4] = config["cx"].template as<double>();
+    camera_info[5] = config["cy"].template as<double>();
+    camera_info[6] = config["k1"].template as<double>();
+    camera_info[7] = config["k2"].template as<double>();
+    camera_info[8] = config["p1"].template as<double>();
+    camera_info[9] = config["p2"].template as<double>();
+
+    return camera_info;
+  };
+  ;
+
+  const std::string calibration_file =
+      this->get_parameter("calibration").as_string();
+  const std::string base_pose = this->get_parameter("base_pose").as_string();
+  const std::string camera = this->get_parameter("camera").as_string();
+
+  YAML::Node calibration = YAML::LoadFile(calibration_file);
+  m_base_pose = load_pose_yaml(calibration[base_pose]);
+  m_pose_wc = load_pose_yaml(calibration[camera]["pose"]);
+
+  Eigen::Vector<double, 10> camera_info = load_camera_yaml(calibration[camera]["intrinsics"]);
+  m_height = std::round(camera_info[0]);
+  m_width = std::round(camera_info[1]);
+  m_intrinsics = camera_info.tail<8>().cast<float>();
+  m_depth_scale = -calibration[camera]["depth_scale"].as<double>();
 
   const std::string color_topic =
       this->get_parameter("color_topic").as_string();
